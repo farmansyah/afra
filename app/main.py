@@ -13,7 +13,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import checks, db, discovery, gaps, integrations, models, quality, research, writer
+from . import checks, db, discovery, gaps, integrations, models, quality, research, updater, writer
 from .citations import STYLES, bibliography, parse_bibtex, to_bibtex, to_ris
 from .config import BASE_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -100,6 +100,25 @@ def meta():
             "templates": {k: v["name"] for k, v in TEMPLATES.items()},
             "sources": SOURCES, "tools": {k: v[0] for k, v in writer.TOOLS.items()},
             "rubric": writer.RUBRIC, "gate": writer.GATE, "sjr_journals": quality.sjr_count()}
+
+
+@app.get("/api/version")
+def version():
+    from .version import VERSION
+    return {"version": VERSION, "dev_copy": updater.is_dev_copy()}
+
+
+@app.get("/api/update/check")
+async def update_check():
+    return await updater.check()
+
+
+@app.post("/api/update/apply")
+async def update_apply():
+    db.backup("before-update")
+    result = await updater.apply()
+    asyncio.get_running_loop().call_later(1.5, updater.restart)  # respond first, then restart on the new code
+    return result
 
 
 @app.get("/api/settings")

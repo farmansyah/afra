@@ -19,14 +19,18 @@ own computer, in your web browser, and keeps all your data on your computer.
 
 ### Mac
 1. Unzip `AFRA.zip`, for example into your Documents folder.
-2. **Right-click** **`Start AFRA.command`**, choose **Open**, then **Open** again. You only need to do this
-   the first time; macOS asks because the file was downloaded.
+2. Open **`AFRA.app`** (the blue AF icon). The first time, macOS asks because the app was downloaded:
+   **right-click → Open → Open**. On newer macOS, go to **System Settings → Privacy & Security** and click
+   **Open Anyway**. Drag `AFRA.app` to your Dock so it's always one click away.
    - If Python isn't installed yet, a message explains what to do and the download page opens. Install Python, then
-     double-click `Start AFRA.command` again.
+     open `AFRA.app` again.
 3. AFRA opens in your browser. After the first time, a normal double-click is enough.
 
-> Keep the small black window (Windows) or Terminal window (Mac) open while you work. Closing it stops the app,
-> and your work is already saved.
+> On Windows, keep the small black window open while you work (closing it stops the app; your work is already
+> saved). On Mac, A.F.R.A runs quietly in the background: just open `AFRA.app` again to bring it back.
+>
+> **Updates:** when a new version is available, a yellow *Update available* button appears in the sidebar.
+> One click installs it and keeps all your data.
 
 ### Connect an AI model (one time)
 Open **Settings**, choose a provider under *Quick preset*, paste your API key, and click **Test connection**.

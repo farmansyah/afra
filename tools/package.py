@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".venv", "data", "dist", "__pycache__", ".git", ".claude"}
-EXEC = {"Start AFRA.command", "start.sh"}
+EXEC = {"Start AFRA.command", "start.sh", "AFRA"}  # "AFRA" = the Mac app launcher inside AFRA.app
 
 
 def main():

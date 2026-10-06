@@ -20,6 +20,14 @@ if __name__ == "__main__":
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
     url = f"http://{args.host}:{args.port}"
+    if os.environ.pop("AFRA_WAIT_PORT", None):  # restarted after an update: wait until the old server has exited
+        import socket
+        import time
+        for _ in range(60):
+            with socket.socket() as sk:
+                if sk.connect_ex((args.host, args.port)) != 0:
+                    break
+            time.sleep(0.5)
     print(f"\n  A.F.R.A running at {url}\n  (c) 2026 danafarmansyah. Crafted with love.\n  Press Ctrl+C to stop.\n")
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()

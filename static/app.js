@@ -116,18 +116,60 @@ async function refreshMeter() {
     el.innerHTML = `<a href="#usage" style="color:#9fc3ff;text-decoration:none">Today: ${fmtTok(u.input + u.output)} tokens${u.cost ? ` · $${u.cost < 0.01 ? u.cost.toFixed(4) : u.cost.toFixed(2)}` : ""}</a>`;
   } catch { }
 }
+async function checkUpdates(force) {
+  try {
+    const last = +localStorage.getItem("rt_upd_checked") || 0;
+    if (!force && Date.now() - last < 6 * 3600e3 && !localStorage.getItem("rt_upd_available")) return null;
+    const r = await api("/api/update/check"); localStorage.setItem("rt_upd_checked", Date.now());
+    if (r.available && !r.dev_copy) localStorage.setItem("rt_upd_available", r.latest); else localStorage.removeItem("rt_upd_available");
+    showUpdateBadge(); return r;
+  } catch { return null; }
+}
+function showUpdateBadge() {
+  const v = localStorage.getItem("rt_upd_available"); const el = $("#updBadge");
+  if (el) el.innerHTML = v ? `<a href="#settings" style="display:block;margin:8px 6px 0;padding:8px 10px;border-radius:8px;background:#ffc857;color:#14213d;font-weight:600;text-decoration:none;font-size:13px">⬆ Update available: tap to install</a>` : "";
+}
+async function runUpdate(btn) {
+  if (!confirm("Update A.F.R.A now? Your library, documents and settings are kept. A.F.R.A restarts in about a minute.")) return;
+  await busy(btn, async () => {
+    const r = await api("/api/update/apply", { method: "POST" });
+    localStorage.removeItem("rt_upd_available");
+    main().insertAdjacentHTML("afterbegin", `<div class="notice info" id="updMsg">Updated to version ${esc(r.updated_to || "?")}. Restarting…${r.components_ok ? "" : " (some components could not be installed: check your internet)"}</div>`);
+    await new Promise((res) => setTimeout(res, 3000));
+    for (let i = 0; i < 60; i++) { try { await api("/api/meta"); location.reload(); return; } catch { await new Promise((res) => setTimeout(res, 2000)); } }
+    $("#updMsg").innerHTML = "Update installed. Please close and reopen A.F.R.A.";
+  });
+}
+const THEMES = [
+  ["auto", "Auto (follow my computer)", ["#14213d", "#f6f5f1", "#1f4e79"], ["#0b1019", "#0f1420", "#6aa3e8"]],
+  ["navy", "Navy (default)", ["#14213d", "#f6f5f1", "#1f4e79"]],
+  ["dark", "Midnight (dark)", ["#0b1019", "#0f1420", "#6aa3e8"]],
+  ["forest", "Forest", ["#12302a", "#f4f6f2", "#1f6f50"]],
+  ["plum", "Plum", ["#23143d", "#f7f5fa", "#5b3fa6"]],
+  ["paper", "Paper (warm)", ["#3b2a20", "#f3ede2", "#8a4b2a"]],
+  ["ocean", "Ocean", ["#0f3d4a", "#f2f7f7", "#0f766e"]],
+];
+function applyTheme(t) {
+  try { localStorage.setItem("rt_theme", t); } catch { }
+  const real = t === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "navy") : t;
+  if (real === "navy") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", real);
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if ((localStorage.getItem("rt_theme") || "navy") === "auto") applyTheme("auto"); });
 function renderLLMStatus() {
   const s = S.settings;
-  $("#llmStatus").innerHTML = (llmReady() ? `<span class="dot ok"></span>${esc(s.llm_model)}${s.llm_fast_model ? `<div class="small" style="opacity:.75;margin-left:14px">fast: ${esc(s.llm_fast_model)}</div>` : ""}${s.llm_review_model ? `<div class="small" style="opacity:.75;margin-left:14px">review: ${esc(s.llm_review_model)}</div>` : ""}` : `<span class="dot"></span>AI not configured — <a href="#settings" style="color:#9fc3ff">Settings</a>`) + `<div id="usageMeter" style="margin-top:6px"></div>`;
+  $("#llmStatus").innerHTML = (llmReady() ? `<span class="dot ok"></span>${esc(s.llm_model)}${s.llm_fast_model ? `<div class="small" style="opacity:.75;margin-left:14px">fast: ${esc(s.llm_fast_model)}</div>` : ""}${s.llm_review_model ? `<div class="small" style="opacity:.75;margin-left:14px">review: ${esc(s.llm_review_model)}</div>` : ""}` : `<span class="dot"></span>AI not configured — <a href="#settings" style="color:#9fc3ff">Settings</a>`) + `<div id="usageMeter" style="margin-top:6px"></div><div id="updBadge"></div>`;
+  showUpdateBadge();
   refreshMeter();
 }
 async function boot() {
   [S.meta, S.settings] = await Promise.all([api("/api/meta"), api("/api/settings")]);
+  applyTheme(S.settings.ui_theme || "navy");
   await loadProjects(); renderLLMStatus();
   $("#projectSelect").onchange = async (e) => { await loadProjects(e.target.value); route(); };
   $("#newProjectBtn").onclick = newProjectDialog;
   window.addEventListener("hashchange", route); route();
   setInterval(refreshMeter, 20000);
+  checkUpdates(false);
   // never lose typing: warn before leaving while a save is still pending (drafts are also kept in localStorage)
   window.addEventListener("beforeunload", (e) => { if (S.pending > 0) { e.preventDefault(); e.returnValue = ""; } });
 }
@@ -1352,6 +1394,7 @@ VIEWS.settings = async () => {
       <div class="row" style="margin-top:12px"><button class="btn primary" id="save1">Save</button></div>
     </div>
     <div>
+      <div class="card"><h3>Appearance</h3><div class="themes" id="themes"></div></div>
       <div class="card"><h3>Which model does which job</h3>
         <p class="small muted" style="margin-top:0">Lists are loaded live from your providers (refreshed every 6 hours), so new models appear automatically. ★ marks the current recommendation. Prices are USD per 1M tokens (input / output).</p>
         <div class="row"><b class="small">One-click combination:</b><button class="btn small" data-combo="balanced">Balanced (recommended)</button><button class="btn small" data-combo="budget">Budget</button><button class="btn small" data-combo="quality">Max quality</button><button class="btn small ghost" id="mrefresh">↻ Refresh lists</button></div>
@@ -1377,6 +1420,7 @@ VIEWS.settings = async () => {
       <div class="card"><h3>Journal quartiles (SJR)</h3>
         <p class="small muted" style="margin-top:0">${S.meta.sjr_journals ? `<b style="color:var(--ok)">✓ ${S.meta.sjr_journals.toLocaleString()} journals loaded.</b> ` : ""}For official Q1–Q4 quartiles: open <a href="https://www.scimagojr.com/journalrank.php" target="_blank">scimagojr.com/journalrank.php</a>, click <b>Download data</b> (top right), then choose that file here. Do this once a year. Without it, quartiles are estimated from OpenAlex.</p>
         <label class="btn">Import SCImago file (.csv)<input type="file" id="sjrf" accept=".csv,.txt" hidden></label></div>
+      <div class="card"><h3>Updates</h3><div id="upd" class="small muted">Checking…</div></div>
       <div class="card"><h3>Your data & backups</h3><div id="bk" class="small muted">Loading…</div></div>
       <div class="card"><h3>Project</h3><label class="f">Name</label><input type="text" id="pname" value="${esc(S.project.name)}">
         <div class="row" style="margin-top:10px"><button class="btn" id="prename">Rename</button><button class="btn danger" id="pdel">Delete project…</button></div></div>
@@ -1468,6 +1512,25 @@ VIEWS.settings = async () => {
     $("#bknow").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/backups", { method: "POST" }); toast("Backup created", "ok"); loadBk(); });
   };
   loadBk();
+  const drawThemes = () => {
+    const cur = S.settings.ui_theme || "navy";
+    $("#themes").innerHTML = THEMES.map(([k, name, c, c2]) => `<button class="theme-sw ${k === cur ? "on" : ""}" data-theme-pick="${k}"><div class="pv">${c2 ? `<i style="background:linear-gradient(135deg,${c[0]} 50%,${c2[0]} 50%)"></i><span style="background:linear-gradient(135deg,${c[1]} 50%,${c2[1]} 50%)"><b style="background:${c[2]};width:70%"></b><b style="background:${c2[2]};width:45%"></b></span>` : `<i style="background:${c[0]}"></i><span style="background:${c[1]}"><b style="background:${c[2]};width:70%"></b><b style="background:${c[2]};opacity:.35;width:45%"></b></span>`}</div><div class="nm">${esc(name)}</div></button>`).join("");
+    $$("[data-theme-pick]").forEach((b) => b.onclick = async () => {
+      applyTheme(b.dataset.themePick);
+      S.settings = await api("/api/settings", { method: "PUT", body: { ui_theme: b.dataset.themePick } }); drawThemes();
+    });
+  };
+  drawThemes();
+  const drawUpd = (r, ver) => {
+    const box = $("#upd"); if (!box) return;
+    if (!r) { box.innerHTML = `Version ${esc(ver.version)}. Could not reach GitHub to check for updates (no internet?). <button class="btn small" id="updchk">Check again</button>`; }
+    else if (ver.dev_copy) { box.innerHTML = `Version ${esc(ver.version)}. This is the developer copy: updates come from git, not from this button.`; }
+    else if (r.available) { box.innerHTML = `<div style="color:var(--ink)">Version <b>${esc(r.latest)}</b> is available (you have ${esc(r.current)}).</div><div class="row" style="margin-top:8px"><button class="btn primary" id="updgo">⬆ Update A.F.R.A</button><button class="btn small" id="updchk">Check again</button></div><div style="margin-top:6px">Your library, documents, settings and keys are kept. The old version is backed up.</div>`; }
+    else { box.innerHTML = `✓ You have the latest version (${esc(r.current)}). <button class="btn small" id="updchk">Check again</button>`; }
+    const g = $("#updgo"); if (g) g.onclick = () => runUpdate(g);
+    const c = $("#updchk"); if (c) c.onclick = (e) => busy(e.currentTarget, async () => drawUpd(await checkUpdates(true), ver));
+  };
+  api("/api/version").then(async (ver) => drawUpd(await checkUpdates(true), ver));
   $("#prename").onclick = async () => { await api(`/api/projects/${S.project.id}`, { method: "PUT", body: { name: $("#pname").value } }); await loadProjects(S.project.id); toast("Renamed", "ok"); };
   $("#pdel").onclick = async () => {
     if (S.projects.length < 2) return toast("Can't delete the only project", "bad");

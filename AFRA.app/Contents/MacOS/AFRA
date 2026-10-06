@@ -1,0 +1,50 @@
+#!/bin/bash
+# A.F.R.A for macOS. Starts quietly in the background and opens in your browser.
+# (c) 2026 danafarmansyah. Crafted with love.
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"   # the A.F.R.A folder that contains AFRA.app
+cd "$APP_DIR" || exit 1
+URL="http://localhost:8765"
+export PATH="/Library/Frameworks/Python.framework/Versions/Current/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+mkdir -p data
+
+say_note() { osascript -e "display notification \"$1\" with title \"A.F.R.A\"" >/dev/null 2>&1; }
+say_alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"A.F.R.A\" with icon caution" >/dev/null 2>&1; }
+
+# already running? just open it
+if curl -s -o /dev/null -m 2 "$URL/api/meta"; then open "$URL"; exit 0; fi
+
+find_python() {
+  for p in python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$p" >/dev/null 2>&1 && "$p" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+      command -v "$p"; return 0
+    fi
+  done
+  return 1
+}
+
+if [ ! -x ".venv/bin/python" ]; then
+  PY="$(find_python)"
+  if [ -z "$PY" ]; then
+    osascript -e 'display dialog "A.F.R.A needs Python (free), one time only.\n\n1. The download page will open: click the yellow Download Python button.\n2. Open the downloaded file and click Continue until it finishes.\n3. Open A.F.R.A again." buttons {"Open download page"} default button 1 with title "A.F.R.A: one-time setup"' >/dev/null 2>&1
+    open "https://www.python.org/downloads/macos/"
+    exit 1
+  fi
+  say_note "Setting up A.F.R.A for the first time. This takes about a minute…"
+  "$PY" -m venv .venv >> data/setup.log 2>&1 || { say_alert "Setup failed while preparing Python. Details are in data/setup.log."; exit 1; }
+fi
+
+# install / update components only when requirements.txt changed
+REQ_HASH="$(shasum requirements.txt | cut -d' ' -f1)"
+if [ "$(cat .venv/.req_hash 2>/dev/null)" != "$REQ_HASH" ]; then
+  say_note "Installing A.F.R.A components…"
+  .venv/bin/python -m pip install -q --disable-pip-version-check -r requirements.txt >> data/setup.log 2>&1 \
+    || { say_alert "Could not install components. Please check your internet connection and open A.F.R.A again."; exit 1; }
+  echo "$REQ_HASH" > .venv/.req_hash
+fi
+
+nohup .venv/bin/python run.py --no-browser >> data/server.log 2>&1 &
+for i in $(seq 1 60); do
+  curl -s -o /dev/null -m 2 "$URL/api/meta" && break
+  sleep 1
+done
+open "$URL"
