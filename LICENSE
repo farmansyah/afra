@@ -1,0 +1,21 @@
+A.F.R.A: Article Finder & Research Assistant
+Copyright (c) 2026 danafarmansyah. All rights reserved.
+Crafted with love.
+
+This software, including its name, logo ("AF" monogram), user interface design and
+source code, is the property of danafarmansyah. No part of it may be copied,
+modified, distributed, sublicensed or sold without prior written permission from
+the copyright holder, except for personal use of an authorised copy.
+
+Documents, manuscripts and data you create with A.F.R.A belong to you.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM THE USE OF THE SOFTWARE. Always verify AI-generated text,
+citations and analyses before submission.
+
+Third-party components keep their own licences: FastAPI, Uvicorn, HTTPX (BSD/MIT),
+python-docx (MIT), pypdf (BSD), marked (MIT), DOMPurify (Apache-2.0/MPL-2.0).
+Scholarly data courtesy of OpenAlex (CC0), Crossref, Europe PMC, arXiv and
+Semantic Scholar. Workflow ideas inspired by deep-research-web-ui,
+aipoch/open-science and academic-paper-skills (see their own licences).

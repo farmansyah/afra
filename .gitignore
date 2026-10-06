@@ -1,0 +1,15 @@
+# Your private data: database, API keys (settings.json), PDFs, backups, logs. Never commit.
+data/
+# Local Python environment and build output
+.venv/
+dist/
+__pycache__/
+*.pyc
+*.tmp
+# Editor / tool settings
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
