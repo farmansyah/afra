@@ -208,8 +208,14 @@ function addFooter() {
   if (!main() || $("#appFooter", main())) return;
   main().insertAdjacentHTML("beforeend", `<footer id="appFooter" class="app-footer">
     <div><img class="brand-logo" src="${logoUrl()}" alt=""><b>A.F.R.A</b> · Article Finder &amp; Research Assistant</div>
-    <div>© ${YEARS} <b>danafarmansyah</b>. All rights reserved. · Crafted with <span class="heart" title="love">♥</span></div></footer>`);
+    <div>© ${YEARS} <b>danafarmansyah</b>. All rights reserved. · Crafted with <button class="heart dedi-heart" type="button" title="♥" aria-label="A little note">♥</button></div></footer>`);
 }
+// a small note, tucked behind the heart
+function dedication() {
+  modal(`<div class="dedi"><img src="${logoUrl()}" alt=""><h2>For Raina Afra</h2><p>This little app carries your name. I built it so your long research nights feel a little lighter, and so every paper you finish has someone quietly cheering you on.</p><div class="sig">— Dana</div>
+    <button class="btn" onclick="closeModal()">Close</button></div>`);
+}
+document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
 const needLLM = () => llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;
 
 // ================================================================== HOME

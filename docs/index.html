@@ -125,6 +125,44 @@
   footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; align-items: center; }
   footer a { color: #cfdaee; }
   .heart { color: #e5484d; }
+  .dedi-heart { background: none; border: 0; padding: 0 2px; font: inherit; color: #e5484d; cursor: pointer; display: inline-block; }
+  .dedi-heart:hover, .dedi-heart:focus-visible { animation: beat 1s ease-in-out infinite; outline: none; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.3); } 30% { transform: scale(1); } 45% { transform: scale(1.18); } }
+  .dedi-wrap { position: fixed; inset: 0; z-index: 50; background: rgba(14, 23, 41, .55); display: grid; place-items: center; padding: 20px; }
+  .dedi-wrap[hidden] { display: none; }
+  .dedi { background: #fffdf8; color: var(--ink); border-radius: 18px; padding: 30px 26px 24px; max-width: 440px; text-align: center; box-shadow: 0 30px 70px rgba(0,0,0,.35); }
+  .dedi img { width: 56px; height: 56px; border-radius: 13px; }
+  .dedi h2 { font-size: 26px; margin: 14px 0 10px; }
+  .dedi p { font-family: var(--serif); font-size: 17px; line-height: 1.7; color: #3d4659; margin: 0 0 12px; }
+  .dedi .sig { font-family: var(--serif); font-style: italic; color: var(--muted); margin-bottom: 18px; }
+
+  /* ---------------- phones */
+  @media (max-width: 640px) {
+    body { font-size: 15.5px; }
+    .wrap { padding: 0 16px; }
+    nav .wrap { height: 56px; }
+    .brand { font-size: 17px; } .brand img { width: 28px; height: 28px; }
+    .hero { padding: 36px 0 64px; }
+    .hero h1 { font-size: 32px; }
+    .hero p.lead { font-size: 16.5px; }
+    .cta { flex-direction: column; align-items: stretch; }
+    .cta .btn { justify-content: center; }
+    .sources { gap: 6px; }
+    .mock .body { grid-template-columns: 1fr; min-height: 0; }
+    .mock .side { display: none; }
+    section { padding: 54px 0; }
+    .center { margin-bottom: 28px; }
+    .stats { grid-template-columns: 1fr 1fr; gap: 10px; margin-top: -36px; }
+    .stat { padding: 14px; } .stat b { font-size: 22px; } .stat span { font-size: 12px; }
+    .card { padding: 18px; }
+    .flow { grid-template-columns: 1fr; gap: 18px; }
+    .step { border-left: 0; border-top: 2px solid var(--line); padding: 14px 0 0; }
+    .step:first-child { border-top: 0; padding-top: 0; }
+    .os { padding: 18px; }
+    .chips span { font-size: 13px; padding: 6px 12px; }
+    details { padding: 14px 16px; }
+    footer .wrap { flex-direction: column; align-items: flex-start; gap: 8px; }
+  }
 </style>
 </head>
 <body>
@@ -247,8 +285,20 @@
 
 <footer><div class="wrap">
   <div><img src="favicon.svg" alt="" style="width:18px;height:18px;border-radius:4px;vertical-align:-4px;margin-right:6px"><b style="color:#fff">A.F.R.A</b> · Article Finder &amp; Research Assistant</div>
-  <div>© 2026 <b style="color:#fff">danafarmansyah</b>. All rights reserved. · Crafted with <span class="heart">♥</span> · <a href="https://github.com/farmansyah/afra">GitHub</a></div>
+  <div>© 2026 <b style="color:#fff">danafarmansyah</b>. All rights reserved. · Crafted with <button class="heart dedi-heart" type="button" title="♥" aria-label="A little note">♥</button> · <a href="https://github.com/farmansyah/afra">GitHub</a></div>
 </div></footer>
 
+<div class="dedi-wrap" id="dedi" role="dialog" aria-modal="true" aria-label="For Raina Afra" hidden>
+  <div class="dedi"><img src="favicon.svg" alt=""><h2>For Raina Afra</h2><p>This little app carries your name. I built it so your long research nights feel a little lighter, and so every paper you finish has someone quietly cheering you on.</p><div class="sig">— Dana</div>
+    <button type="button" class="btn dark small" id="dediClose">Close</button></div>
+</div>
+<script>
+  (function () {
+    var box = document.getElementById("dedi");
+    document.querySelectorAll(".dedi-heart").forEach(function (h) { h.addEventListener("click", function () { box.hidden = false; }); });
+    box.addEventListener("click", function (e) { if (e.target === box || e.target.id === "dediClose") box.hidden = true; });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") box.hidden = true; });
+  })();
+</script>
 </body>
 </html>
