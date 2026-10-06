@@ -272,7 +272,7 @@
   <div class="center"><h2>Questions</h2></div>
   <details><summary>Is A.F.R.A free?</summary><p>Yes, the app is free to download and use. AI features use your own API key, so you pay your provider directly (often cents per paper), or use a free local model through Ollama. Literature search, quality filters, snowballing, the reference checker and many more features use no AI at all.</p></details>
   <details><summary>Where is my data stored?</summary><p>Only on your computer, in A.F.R.A's <code>data</code> folder: your library, PDFs, drafts and API keys. It makes automatic backups every 6 hours and before anything is deleted. Only your search queries go to the scholarly databases, and only your prompts go to the AI provider you choose.</p></details>
-  <details><summary>Does it write my paper for me?</summary><p>It assists. It finds and organises evidence, checks quality and drafts text you then revise. You stay the author, and A.F.R.A never invents data or results. It includes a similarity check and an AI-use disclosure generator, because most journals accept AI assistance when it's disclosed.</p></details>
+  <details><summary>Does it write my paper for me?</summary><p>It assists. It finds and organises evidence, checks quality and drafts text you then revise. You stay the author, and A.F.R.A never invents data or results. Its similarity check flags wording that's too close to your sources, so you can rewrite it in your own words.</p></details>
   <details><summary>Can I use it online, without installing?</summary><p>Not at the moment. A.F.R.A runs on your own computer so that your unpublished work stays private. This website is its homepage.</p></details>
   <details><summary>Which journals and formats are supported?</summary><p>Word export with APA 7, IEEE (two-column), a general journal-article layout, a research-report layout and the Indonesian Skripsi/Tesis format. References in APA, IEEE, Harvard, Chicago, Vancouver or MLA. The Journal fit checker reads any journal's author guidelines.</p></details>
 </div></section>
@@ -300,5 +300,6 @@
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") box.hidden = true; });
   })();
 </script>
+<script src="heartbeat.js"></script>
 </body>
 </html>

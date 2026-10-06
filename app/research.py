@@ -11,11 +11,12 @@ import re
 import time
 
 from . import db, quality
+from .writer import VOICE
 from .llm import complete_json, stream_chat
 from .search import fetch_page, make_key, search_all
 
 SYSTEM = ("You are an expert academic researcher. Today is {today}. Be precise, evidence-driven and "
-          "skeptical; prefer peer-reviewed sources; mark speculation clearly. Write in {language}.")
+          "skeptical; prefer peer-reviewed sources; mark speculation clearly. Write in {language}. " + VOICE)
 
 RUNS: dict[str, "ResearchRun"] = {}
 

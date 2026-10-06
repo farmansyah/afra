@@ -251,7 +251,7 @@ async def gaps_write(doc_id: str):
     m = doc["meta"]
     prompt = gaps.p_gap_writeup(m["topic"], m["facets"], m["contribution"], m["coverage"], m["papers"], m["table"],
                                 m.get("language", "English"))
-    return _stream(prompt, "You are a senior researcher writing a rigorous, honest gap analysis.", task="gaps-write")
+    return _stream(prompt, "You are a senior researcher writing a rigorous, honest gap analysis. " + writer.VOICE, task="gaps-write")
 
 
 @app.post("/api/gaps/{doc_id}/finalize")
@@ -784,13 +784,13 @@ async def run_tool(body: dict):
     if tool not in writer.TOOLS:
         raise HTTPException(400, "Unknown tool")
     return _stream(writer.p_tool(tool, body.get("text", ""), body.get("extra", ""), body.get("language", "")),
-                   "You are an expert academic writing assistant.", task=f"tool-{tool}")
+                   "You are an expert academic editor. " + writer.VOICE, task=f"tool-{tool}")
 
 
 @app.post("/api/tools/ask-library")
 async def ask_library(body: dict):
     lib = writer.library_context(body["project_id"], query=body["question"], max_items=15, chars=1500)
-    return _stream(writer.p_ask_library(body["question"], lib), "You are a meticulous research assistant.", task="ask-library")
+    return _stream(writer.p_ask_library(body["question"], lib), "You are a meticulous researcher. " + writer.VOICE, task="ask-library")
 
 
 @app.post("/api/tools/suggest-citations")

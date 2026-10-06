@@ -688,4 +688,15 @@ def build_docx(markdown: str, meta: dict, library: dict, template="apa7", style=
         extra = [p for k, p in library.items() if k not in cited_keys]
         entries = bibliography(cited + extra, style)
     b.references(entries, style)
+    # document properties (Word: File > Info) carry the author's details, not the generating library's
+    import datetime
+    cp = b.doc.core_properties
+    who = re.split(r"\s*(?:,|;| and | & )\s*", (meta.get("authors") or "").strip())[0]
+    cp.author = cp.last_modified_by = who
+    cp.title = meta.get("title") or ""
+    cp.subject = cp.category = cp.content_status = cp.identifier = ""
+    cp.comments = ""
+    cp.keywords = meta.get("keywords") if isinstance(meta.get("keywords"), str) else ", ".join(meta.get("keywords") or [])
+    cp.created = cp.modified = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    cp.revision = 1
     return b.save(), {"cited": len(cited), "missing": missing}

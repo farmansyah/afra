@@ -19,12 +19,14 @@ RUBRIC = [
     ("accuracy", "Technical accuracy and evidential support"),
 ]
 GATE = 28
+VOICE = ("Write as the author, in the first person plural or impersonal academic voice as appropriate. Output only the requested text: no preambles (e.g. 'Here is...'), no closing remarks, and never mention AI, language models, assistants or how the text was produced.")
 
 
 def system_prompt(paper: dict) -> str:
     return (f"You are a senior academic author and journal reviewer in {paper.get('field') or 'the relevant field'}. "
             f"Write in {paper.get('language') or 'English'} using formal academic register, precise terminology, "
-            "hedged claims where evidence is limited, and no filler. Never fabricate data, results or citations.")
+            "hedged claims where evidence is limited, and no filler. Never fabricate data, results or citations. "
+            + VOICE)
 
 
 def library_context(project_id: str, keys: list[str] | None = None, max_items=60, chars=700, query: str = "") -> str:
@@ -213,11 +215,6 @@ TOOLS = {
     "methods_check": ("Methodology check", "Evaluate the research methodology described: design, sampling, validity, "
                       "reliability, ethics, statistical approach, threats to validity, and missing reporting items "
                       "(e.g., per CONSORT/PRISMA/STROBE where relevant). Markdown."),
-    "disclosure": ("AI-use disclosure statement", "Write a short, honest AI-use disclosure statement for a journal "
-                   "submission (following ICMJE / COPE / Elsevier / Springer Nature policies). Based on the notes in the text "
-                   "(which tools were used and for what), state that AI assisted with literature discovery, language "
-                   "editing and/or drafting, that the authors reviewed and edited all content and take full responsibility, and "
-                   "that AI is not an author. Provide a version for the Methods/Acknowledgements section."),
     "simplify": ("Plain-language summary", "Write a plain-language summary (for non-specialists, ~150 words) of this text."),
 }
 
