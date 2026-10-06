@@ -149,8 +149,8 @@ const THEMES = [
   ["paper", "Paper (warm)", ["#3b2a20", "#f3ede2", "#8a4b2a"]],
   ["ocean", "Ocean", ["#0f3d4a", "#f2f7f7", "#0f766e"]],
 ];
-const LOGOS = [["soft", "Soft serif"], ["editorial", "Editorial serif"], ["classic", "Classic book serif"]];
-const logoUrl = () => `/static/logos/${document.documentElement.getAttribute("data-logo") || "soft"}.svg`;
+const LOGOS = [["classic", "Classic book serif"], ["soft", "Soft serif"], ["editorial", "Editorial serif"]];
+const logoUrl = () => `/static/logos/${document.documentElement.getAttribute("data-logo") || "classic"}.svg`;
 function applyLogo(l) {
   try { localStorage.setItem("rt_logo", l); } catch { }
   document.documentElement.setAttribute("data-logo", l);
@@ -172,7 +172,7 @@ function renderLLMStatus() {
 async function boot() {
   [S.meta, S.settings] = await Promise.all([api("/api/meta"), api("/api/settings")]);
   applyTheme(S.settings.ui_theme || "navy");
-  applyLogo(S.settings.ui_logo || "soft");
+  applyLogo(S.settings.ui_logo || "classic");
   await loadProjects(); renderLLMStatus();
   $("#projectSelect").onchange = async (e) => { await loadProjects(e.target.value); route(); };
   $("#newProjectBtn").onclick = newProjectDialog;
@@ -1531,11 +1531,11 @@ VIEWS.settings = async () => {
   };
   drawThemes();
   const drawLogos = () => {
-    const cur = S.settings.ui_logo || "soft";
+    const cur = S.settings.ui_logo || "classic";
     $("#logos").innerHTML = LOGOS.map(([k, name]) => `<button class="${k === cur ? "on" : ""}" data-logo-pick="${k}"><img src="/static/logos/${k}.svg" alt=""><span style="font-family:${k === "soft" ? "Fraunces" : k === "editorial" ? "'DM Serif Display'" : "'Libre Baskerville'"},serif;font-size:14px">${esc(name)}</span></button>`).join("");
     $$("[data-logo-pick]").forEach((b) => b.onclick = async () => {
       applyLogo(b.dataset.logoPick);
-      S.settings = await api("/api/settings", { method: "PUT", body: { ui_logo: b.dataset.logoPick } }); drawLogos();
+      S.settings = await api("/api/settings", { method: "PUT", body: { ui_logo: b.dataset.logoPick, ui_logo_chosen: true } }); drawLogos();
     });
   };
   drawLogos();

@@ -28,7 +28,7 @@ STYLES = {
              "#14213d", "#f4e9d0", None, -0.03),
     "editorial": ("Editorial serif", "dmserifdisplay/DMSerifDisplay-Regular.ttf", {}, "#14213d", "#ffffff", None, -0.02),
     "classic": ("Classic book serif", "librebaskerville/LibreBaskerville%5Bwght%5D.ttf", {"wght": 700},
-                "#ffffff", "#14213d", "#d9dde5", 0.0),
+                "#ffffff", "#14213d", "#d9dde5", 0.035),
 }
 
 
@@ -153,7 +153,7 @@ def raster_icon(key, garnish="dot", px=1024):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--garnish", default="dot", choices=["dot", "none"])
-    ap.add_argument("--mac", default="soft", choices=list(STYLES), help="style used for the Mac app icon and website")
+    ap.add_argument("--mac", default="classic", choices=list(STYLES), help="style used for the Mac app icon and website")
     a = ap.parse_args()
     g = None if a.garnish == "none" else a.garnish
     out = ROOT / "static" / "logos"

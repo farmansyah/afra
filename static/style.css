@@ -10,7 +10,7 @@
   --hero-a: #14213d; --hero-b: #1f4e79; --hero-ink-2: #c9d6ea; --toast: #1d2433; --gold: #ffc857;
   --q1-bg: #dcf3e6; --q1: #126b3c; --q2-bg: #e2edfb; --q2: #1f4e79; --q3-bg: #fdf1df; --q3: #8a4f00; --q4-bg: #f2e9e8; --q4: #7a3a32;
   --radius: 10px; color-scheme: light;
-  --serif: "Fraunces", Georgia, "Times New Roman", serif; --head-weight: 600; --head-vari: "SOFT" 100;
+  --serif: "Libre Baskerville", Georgia, "Times New Roman", serif; --head-weight: 700; --head-vari: normal;
   --sans: Inter, "Segoe UI", system-ui, sans-serif;
 }
 /* Midnight (dark) */
@@ -57,7 +57,7 @@ a { color: var(--accent-2); }
 h1, h2, h3 { font-family: var(--serif); font-weight: var(--head-weight); font-variation-settings: var(--head-vari); margin: 0 0 .4em; }
 /* logo style also sets the heading typeface, so the whole app matches the logo */
 :root[data-logo="editorial"] { --serif: "DM Serif Display", Georgia, serif; --head-weight: 400; --head-vari: normal; }
-:root[data-logo="classic"] { --serif: "Libre Baskerville", Georgia, serif; --head-weight: 700; --head-vari: normal; }
+:root[data-logo="soft"] { --serif: "Fraunces", Georgia, serif; --head-weight: 600; --head-vari: "SOFT" 100; }
 .brand b, .big-score, .result .t, .prose h1, .prose h2, .prose h3 { font-variation-settings: var(--head-vari); }
 .logo-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
 .logo-pick button { border: 2px solid var(--line); border-radius: 12px; background: var(--panel); padding: 12px 8px 10px; cursor: pointer; color: var(--ink); font: 500 12px var(--sans); }

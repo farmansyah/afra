@@ -38,7 +38,8 @@ DEFAULTS = {
     "default_citation_style": "apa",
     "default_template": "apa7",
     "ui_theme": "navy",
-    "ui_logo": "soft",                 # soft | editorial | classic (logo + heading typeface)                # navy | dark | forest | plum | paper | ocean | auto
+    "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
+    "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }
 
 ENV_MAP = {
@@ -63,6 +64,8 @@ def get_settings() -> dict:
     if saved and saved.get("sources_version", 1) < 2:  # saved before Europe PMC existed: switch it on once
         s["default_sources"] = list(dict.fromkeys(list(s.get("default_sources") or []) + ["europepmc"]))
         s["sources_version"] = 2
+    if not saved.get("ui_logo_chosen"):  # never picked: follow the current default logo
+        s["ui_logo"] = DEFAULTS["ui_logo"]
     for key, env in ENV_MAP.items():
         if not s.get(key) and os.environ.get(env):
             s[key] = os.environ[env]
