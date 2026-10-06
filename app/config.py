@@ -37,7 +37,8 @@ DEFAULTS = {
     "default_language": "English",
     "default_citation_style": "apa",
     "default_template": "apa7",
-    "ui_theme": "navy",                # navy | dark | forest | plum | paper | ocean | auto
+    "ui_theme": "navy",
+    "ui_logo": "soft",                 # soft | editorial | classic (logo + heading typeface)                # navy | dark | forest | plum | paper | ocean | auto
 }
 
 ENV_MAP = {

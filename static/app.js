@@ -149,6 +149,14 @@ const THEMES = [
   ["paper", "Paper (warm)", ["#3b2a20", "#f3ede2", "#8a4b2a"]],
   ["ocean", "Ocean", ["#0f3d4a", "#f2f7f7", "#0f766e"]],
 ];
+const LOGOS = [["soft", "Soft serif"], ["editorial", "Editorial serif"], ["classic", "Classic book serif"]];
+const logoUrl = () => `/static/logos/${document.documentElement.getAttribute("data-logo") || "soft"}.svg`;
+function applyLogo(l) {
+  try { localStorage.setItem("rt_logo", l); } catch { }
+  document.documentElement.setAttribute("data-logo", l);
+  const fav = $("#favicon"); if (fav) fav.href = `/static/logos/${l}.svg`;
+  $$(".brand-logo").forEach((img) => img.src = `/static/logos/${l}.svg`);
+}
 function applyTheme(t) {
   try { localStorage.setItem("rt_theme", t); } catch { }
   const real = t === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "navy") : t;
@@ -164,6 +172,7 @@ function renderLLMStatus() {
 async function boot() {
   [S.meta, S.settings] = await Promise.all([api("/api/meta"), api("/api/settings")]);
   applyTheme(S.settings.ui_theme || "navy");
+  applyLogo(S.settings.ui_logo || "soft");
   await loadProjects(); renderLLMStatus();
   $("#projectSelect").onchange = async (e) => { await loadProjects(e.target.value); route(); };
   $("#newProjectBtn").onclick = newProjectDialog;
@@ -198,7 +207,7 @@ const YEARS = (() => { const y = new Date().getFullYear(); return y > 2026 ? `20
 function addFooter() {
   if (!main() || $("#appFooter", main())) return;
   main().insertAdjacentHTML("beforeend", `<footer id="appFooter" class="app-footer">
-    <div><img src="/static/favicon.svg" alt=""><b>A.F.R.A</b> · Article Finder &amp; Research Assistant</div>
+    <div><img class="brand-logo" src="${logoUrl()}" alt=""><b>A.F.R.A</b> · Article Finder &amp; Research Assistant</div>
     <div>© ${YEARS} <b>danafarmansyah</b>. All rights reserved. · Crafted with <span class="heart" title="love">♥</span></div></footer>`);
 }
 const needLLM = () => llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;
@@ -207,7 +216,7 @@ const needLLM = () => llmReady() ? "" : `<div class="notice">AI model is not con
 VIEWS.home = async () => {
   const p = S.projects.find((x) => x.id === S.project.id) || {};
   main().innerHTML = `
-  <div class="hero"><h1 style="display:flex;align-items:center;gap:14px"><img src="/static/favicon.svg" alt="" style="width:46px;height:46px;border-radius:11px;box-shadow:0 4px 14px rgba(0,0,0,.25)">A.F.R.A</h1><div style="color:#9fc3ff;margin:-4px 0 8px;font-weight:600">Article Finder &amp; Research Assistant</div>
+  <div class="hero"><h1 style="display:flex;align-items:center;gap:14px"><img class="brand-logo" src="${logoUrl()}" alt="" style="width:46px;height:46px;border-radius:11px;box-shadow:0 4px 14px rgba(0,0,0,.25)">A.F.R.A</h1><div style="color:#9fc3ff;margin:-4px 0 8px;font-weight:600">Article Finder &amp; Research Assistant</div>
     <p>From question to a finished, properly formatted manuscript: deep research with real citations, a literature library,
     a guided paper-writing workflow with reviewer gates, and a DOCX export that follows APA, IEEE, journal and thesis formats.</p></div>
   ${needLLM()}
@@ -1394,7 +1403,7 @@ VIEWS.settings = async () => {
       <div class="row" style="margin-top:12px"><button class="btn primary" id="save1">Save</button></div>
     </div>
     <div>
-      <div class="card"><h3>Appearance</h3><div class="themes" id="themes"></div></div>
+      <div class="card"><h3>Appearance</h3><label class="f">Logo &amp; heading style</label><div class="logo-pick" id="logos"></div><label class="f">Colour theme</label><div class="themes" id="themes"></div></div>
       <div class="card"><h3>Which model does which job</h3>
         <p class="small muted" style="margin-top:0">Lists are loaded live from your providers (refreshed every 6 hours), so new models appear automatically. ★ marks the current recommendation. Prices are USD per 1M tokens (input / output).</p>
         <div class="row"><b class="small">One-click combination:</b><button class="btn small" data-combo="balanced">Balanced (recommended)</button><button class="btn small" data-combo="budget">Budget</button><button class="btn small" data-combo="quality">Max quality</button><button class="btn small ghost" id="mrefresh">↻ Refresh lists</button></div>
@@ -1521,6 +1530,15 @@ VIEWS.settings = async () => {
     });
   };
   drawThemes();
+  const drawLogos = () => {
+    const cur = S.settings.ui_logo || "soft";
+    $("#logos").innerHTML = LOGOS.map(([k, name]) => `<button class="${k === cur ? "on" : ""}" data-logo-pick="${k}"><img src="/static/logos/${k}.svg" alt=""><span style="font-family:${k === "soft" ? "Fraunces" : k === "editorial" ? "'DM Serif Display'" : "'Libre Baskerville'"},serif;font-size:14px">${esc(name)}</span></button>`).join("");
+    $$("[data-logo-pick]").forEach((b) => b.onclick = async () => {
+      applyLogo(b.dataset.logoPick);
+      S.settings = await api("/api/settings", { method: "PUT", body: { ui_logo: b.dataset.logoPick } }); drawLogos();
+    });
+  };
+  drawLogos();
   const drawUpd = (r, ver) => {
     const box = $("#upd"); if (!box) return;
     if (!r) { box.innerHTML = `Version ${esc(ver.version)}. Could not reach GitHub to check for updates (no internet?). <button class="btn small" id="updchk">Check again</button>`; }
