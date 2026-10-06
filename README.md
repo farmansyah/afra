@@ -1,5 +1,7 @@
 # A.F.R.A: Article Finder & Research Assistant
 
+**Website: https://farmansyah.github.io/afra/** · Download: [latest version (zip)](https://github.com/farmansyah/afra/archive/refs/heads/main.zip)
+
 A.F.R.A (Article Finder & Research Assistant) helps you go from a research title to a finished, correctly formatted Word manuscript. It runs on your
 own computer, in your web browser, and keeps all your data on your computer.
 

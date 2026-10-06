@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.F.R.A – Article Finder & Research Assistant</title>
+<meta name="description" content="A.F.R.A takes academic researchers from a research title to a submission-ready Word manuscript: source discovery, evidence for your arguments, gap finding, a guided paper writer and journal-ready formatting. Runs on your own computer.">
+<meta property="og:title" content="A.F.R.A – Article Finder & Research Assistant">
+<meta property="og:description" content="From research title to submission-ready manuscript, on your own computer.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #14213d; --navy-2: #1f3a66; --blue: #2f6db3; --gold: #ffc857; --ink: #1d2433; --muted: #5d6779;
+    --bg: #f6f5f1; --card: #ffffff; --line: #e4e2da; --ok: #1e7b4f;
+    --serif: "Source Serif 4", Georgia, serif; --sans: Inter, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; font: 16px/1.6 var(--sans); color: var(--ink); background: var(--bg); }
+  a { color: var(--blue); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  h1, h2, h3 { font-family: var(--serif); line-height: 1.2; margin: 0 0 .5em; }
+  h2 { font-size: clamp(26px, 3.4vw, 36px); }
+  h3 { font-size: 19px; }
+  .muted { color: var(--muted); }
+
+  /* nav */
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(20, 33, 61, .92); backdrop-filter: blur(8px); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 62px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; font: 700 19px var(--serif); letter-spacing: .06em; }
+  .brand img { width: 32px; height: 32px; border-radius: 8px; }
+  nav .links { display: flex; gap: 22px; align-items: center; }
+  nav .links a { color: #cfdaee; text-decoration: none; font-size: 14px; font-weight: 500; }
+  nav .links a:hover { color: #fff; }
+  @media (max-width: 760px) { nav .links a:not(.btn) { display: none; } }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 10px; font: 600 15px var(--sans);
+    text-decoration: none; border: 1px solid transparent; transition: transform .15s, box-shadow .15s; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.gold { background: var(--gold); color: var(--navy); box-shadow: 0 6px 20px rgba(255, 200, 87, .3); }
+  .btn.ghost { color: #fff; border-color: rgba(255,255,255,.35); }
+  .btn.small { padding: 8px 14px; font-size: 14px; }
+  .btn.dark { background: var(--navy); color: #fff; }
+
+  /* hero */
+  .hero { background: radial-gradient(1200px 500px at 80% -10%, #2f6db3 0%, transparent 60%), linear-gradient(160deg, var(--navy) 0%, var(--navy-2) 100%);
+    color: #fff; padding: 70px 0 90px; overflow: hidden; }
+  .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; }
+  @media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; } }
+  .eyebrow { display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); margin-bottom: 14px; }
+  .hero h1 { font-size: clamp(36px, 5.4vw, 58px); }
+  .hero h1 em { font-style: normal; color: var(--gold); }
+  .hero p.lead { font-size: 19px; color: #cfdaee; max-width: 560px; }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; margin: 28px 0 14px; }
+  .note { font-size: 13px; color: #9fb0cc; }
+  .sources { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+  .sources span { font-size: 12px; padding: 4px 10px; border-radius: 99px; background: rgba(255,255,255,.08); color: #cfdaee; border: 1px solid rgba(255,255,255,.12); }
+
+  /* app mock */
+  .mock { background: #f6f5f1; border-radius: 14px; box-shadow: 0 30px 70px rgba(0,0,0,.45); overflow: hidden; color: var(--ink); transform: perspective(1400px) rotateY(-6deg) rotateX(2deg); }
+  @media (max-width: 900px) { .mock { transform: none; } }
+  .mock .bar { height: 30px; background: #e7e5de; display: flex; gap: 6px; align-items: center; padding: 0 12px; }
+  .mock .bar i { width: 10px; height: 10px; border-radius: 50%; background: #d5d2c8; display: block; }
+  .mock .body { display: grid; grid-template-columns: 130px 1fr; min-height: 330px; }
+  .mock .side { background: var(--navy); padding: 12px 10px; }
+  .mock .side div { color: #cfdaee; font-size: 11px; padding: 6px 8px; border-radius: 6px; margin-bottom: 2px; }
+  .mock .side div.on { background: #2d4a7c; color: #fff; }
+  .mock .main { padding: 14px 16px; }
+  .mock .q { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
+  .mock .r { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .mock .r b { font: 600 12px var(--serif); display: block; }
+  .mock .r small { font-size: 10px; color: var(--muted); }
+  .pill { display: inline-block; font-size: 9.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; margin-right: 4px; }
+  .q1 { background: #dcf3e6; color: #126b3c; } .q2 { background: #e2edfb; color: #1f4e79; } .sup { background: #dcf3e6; color: #126b3c; } .gray { background: #eef0f3; color: #475467; }
+
+  section { padding: 84px 0; }
+  .center { text-align: center; max-width: 720px; margin: 0 auto 44px; }
+
+  /* problem/solution stats */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: -48px; position: relative; }
+  @media (max-width: 800px) { .stats { grid-template-columns: 1fr 1fr; } }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; box-shadow: 0 10px 30px rgba(20,33,61,.08); }
+  .stat b { font: 700 28px var(--serif); color: var(--navy); display: block; }
+  .stat span { font-size: 13px; color: var(--muted); }
+
+  /* features */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .card .ic { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: #e8eff7; color: var(--blue); font-size: 20px; margin-bottom: 12px; }
+  .card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 14.5px; }
+  .card li { margin: 3px 0; }
+  .card li b { color: var(--ink); font-weight: 600; }
+
+  /* workflow */
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; counter-reset: s; }
+  @media (max-width: 800px) { .flow { grid-template-columns: 1fr 1fr; gap: 14px; } }
+  .step { padding: 0 18px; border-left: 2px solid var(--line); }
+  .step:first-child { border-left: 0; }
+  .step .n { font: 700 13px var(--sans); color: var(--blue); letter-spacing: .08em; }
+  .step p { color: var(--muted); font-size: 14.5px; }
+
+  /* band */
+  .band { background: var(--navy); color: #fff; }
+  .band .muted { color: #a9b8d3; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  @media (max-width: 800px) { .two { grid-template-columns: 1fr; } }
+  .os { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 24px; }
+  .os ol { padding-left: 20px; color: #dbe4f3; }
+  .os li { margin: 8px 0; }
+  .os code, .band code { background: rgba(255,255,255,.1); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .chips span { background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px; font-size: 14px; font-weight: 500; }
+
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin-bottom: 10px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details p { color: var(--muted); margin: 10px 0 0; }
+
+  footer { background: var(--navy); color: #a9b8d3; padding: 34px 0; font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; align-items: center; }
+  footer a { color: #cfdaee; }
+  .heart { color: #e5484d; }
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="#"><img src="favicon.svg" alt="">A.F.R.A</a>
+  <div class="links"><a href="#features">Features</a><a href="#how">How it works</a><a href="#install">Install</a><a href="#faq">FAQ</a>
+    <a class="btn gold small" href="https://github.com/farmansyah/afra/archive/refs/heads/main.zip">Download</a></div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <div>
+    <span class="eyebrow">Article Finder &amp; Research Assistant</span>
+    <h1>From research title to a <em>submission-ready</em> manuscript.</h1>
+    <p class="lead">A.F.R.A finds the papers you need, shows which ones back your arguments, maps the research gap, guides your writing and exports a correctly formatted Word file. It runs on your own computer, and your data stays there.</p>
+    <div class="cta">
+      <a class="btn gold" href="https://github.com/farmansyah/afra/archive/refs/heads/main.zip">⬇ Download for Windows &amp; Mac</a>
+      <a class="btn ghost" href="https://github.com/farmansyah/afra">View on GitHub</a>
+    </div>
+    <div class="note">Free to download. Bring your own AI key (OpenRouter, Claude, OpenAI, Gemini, DeepSeek), or run a free local model.</div>
+    <div class="sources"><span>OpenAlex</span><span>Europe PMC · PubMed</span><span>Crossref</span><span>Semantic Scholar</span><span>arXiv</span><span>SCImago quartiles</span></div>
+  </div>
+  <div class="mock" aria-hidden="true">
+    <div class="bar"><i></i><i></i><i></i></div>
+    <div class="body">
+      <div class="side"><div>Deep Research</div><div class="on">Literature Search</div><div>Library</div><div>Gap Finder</div><div>Paper Writer</div><div>Documents</div></div>
+      <div class="main">
+        <div class="q">Discover · “effect of monetite granule composition on setting time and wash-out resistance…”</div>
+        <div class="r"><b>An injectable calcium sulfate–monetite biphasic cement…</b><small><span class="pill q1">Q1</span><span class="pill gray">IF≈6.2</span>covers: monetite, calcium sulfate, injectable</small></div>
+        <div class="r"><b>Self-setting orthopedic cement compositions based on CaHPO₄…</b><small><span class="pill q2">Q2</span><span class="pill gray">h 177</span>found via synonym “CaHPO₄”</small></div>
+        <div class="r"><b>Evidence for your argument</b><small><span class="pill sup">Supports</span>“…calcium sulfate shortened the initial setting time…” ✓ verified</small></div>
+        <div class="r"><b>Gap Finder</b><small>monetite × calcium sulfate × wash-out: <strong>95 papers</strong>, a narrow gap worth stating</small></div>
+      </div>
+    </div>
+  </div>
+</div></header>
+
+<div class="wrap"><div class="stats">
+  <div class="stat"><b>300+</b><span>papers found from a single research title with Discover</span></div>
+  <div class="stat"><b>Q1–Q4</b><span>journal quality filters with SJR quartiles</span></div>
+  <div class="stat"><b>6 styles</b><span>APA · IEEE · Harvard · Chicago · Vancouver · MLA</span></div>
+  <div class="stat"><b>100% local</b><span>your library, drafts and keys never leave your PC</span></div>
+</div></div>
+
+<section id="features"><div class="wrap">
+  <div class="center"><h2>Everything between your idea and the journal</h2><p class="muted">The tools researchers juggle in separate apps, in one place, and built to save AI tokens: most features use none at all.</p></div>
+  <div class="grid">
+    <div class="card"><div class="ic">⌕</div><h3>Find the right sources</h3><ul>
+      <li><b>Discover:</b> paste your title and get up to 200 ranked papers, including synonym and citation-trail matches</li>
+      <li><b>Deep Research:</b> an agent that writes a cited literature report</li>
+      <li><b>Quality filters:</b> Q1–Q4, impact, open access, retracted papers hidden</li>
+      <li><b>Snowballing:</b> references, cited-by and related papers</li></ul></div>
+    <div class="card"><div class="ic">✓</div><h3>Back every argument</h3><ul>
+      <li><b>Evidence finder:</b> type your claim and see which papers <i>support</i>, <i>partially support</i> or <i>contradict</i> it</li>
+      <li>Verbatim quote from each abstract, checked word for word</li>
+      <li>One click inserts the citation right after your sentence</li></ul></div>
+    <div class="card"><div class="ic">◇</div><h3>Find your gap &amp; novelty</h3><ul>
+      <li><b>Gap Finder:</b> breaks your topic into facets and counts what has been published for each combination</li>
+      <li>Table of the closest prior work and what each one did not study</li>
+      <li>Drafts gaps, a novelty statement, research questions and an Introduction paragraph</li></ul></div>
+    <div class="card"><div class="ic">✎</div><h3>Write with a guide</h3><ul>
+      <li><b>Paper Writer:</b> style guide, evidence-backed gaps, outline, then a 35-point simulated reviewer check before drafting</li>
+      <li>Section-by-section drafting with quality checks</li>
+      <li><b>Manuscript upload:</b> see what's missing and which claims still need sources</li></ul></div>
+    <div class="card"><div class="ic">▤</div><h3>A real reference manager</h3><ul>
+      <li>PDFs with a built-in reader, plus quotes and notes with page numbers</li>
+      <li>Folders, smart collections and duplicate merging</li>
+      <li>Zotero sync, Mendeley/EndNote via BibTeX &amp; RIS</li></ul></div>
+    <div class="card"><div class="ic">⬇</div><h3>Submit with confidence</h3><ul>
+      <li><b>Word export:</b> APA 7, IEEE two-column, journal article, <b>Skripsi/Tesis</b> (BAB I, Daftar Pustaka)</li>
+      <li><b>Reference checker:</b> catches invented DOIs, retracted papers and wrong metadata</li>
+      <li><b>Journal fit:</b> word limits, required sections, scope fit</li></ul></div>
+  </div>
+</div></section>
+
+<section id="how" style="background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)"><div class="wrap">
+  <div class="center"><h2>How it works</h2></div>
+  <div class="flow">
+    <div class="step"><div class="n">1 · EXPLORE</div><h3>Ask</h3><p>Paste your title or upload your draft. Discover and Deep Research gather the literature.</p></div>
+    <div class="step"><div class="n">2 · COLLECT</div><h3>Organise</h3><p>Keep the best papers in your library with PDFs, quotes and citation keys like <code>@smith2020</code>.</p></div>
+    <div class="step"><div class="n">3 · WRITE</div><h3>Argue</h3><p>Find your gap, back each claim with evidence, and draft with the guided Paper Writer.</p></div>
+    <div class="step"><div class="n">4 · FINISH</div><h3>Submit</h3><p>Check references and journal fit, then export a Word file in the journal's style.</p></div>
+  </div>
+</div></section>
+
+<section id="install" class="band"><div class="wrap">
+  <div class="center"><h2>Install in two minutes</h2><p class="muted">No programming needed. A.F.R.A opens in your web browser and runs on your computer.</p></div>
+  <div class="two">
+    <div class="os"><h3>Windows</h3><ol>
+      <li><a href="https://github.com/farmansyah/afra/archive/refs/heads/main.zip" style="color:var(--gold)">Download</a> and unzip it into a folder you'll keep.</li>
+      <li>Double-click <code>start.bat</code>. If Python is missing, the download page opens: install it and tick <b>“Add python.exe to PATH”</b>, then double-click <code>start.bat</code> again.</li>
+      <li>A.F.R.A opens in your browser, and a desktop shortcut is created for next time.</li></ol></div>
+    <div class="os"><h3>Mac</h3><ol>
+      <li><a href="https://github.com/farmansyah/afra/archive/refs/heads/main.zip" style="color:var(--gold)">Download</a> and unzip it, e.g. into Documents.</li>
+      <li><b>Right-click</b> <code>Start AFRA.command</code>, choose <b>Open</b>, then <b>Open</b> again (first time only).</li>
+      <li>If Python is missing, a message explains what to do. After that, a double-click is all you need.</li></ol></div>
+  </div>
+  <p class="muted" style="text-align:center;margin-top:26px">Then open <b>Settings</b>, pick your AI provider and paste your key. The <b>Balanced</b> preset picks a strong writing model and a cheap fast model for you.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="center"><h2>Works with the AI you already have</h2><p class="muted">Live model lists, a cheap “fast” model for routine steps, prompt caching, and a token &amp; cost monitor.</p></div>
+  <div class="chips"><span>OpenRouter</span><span>Anthropic Claude</span><span>OpenAI</span><span>Google Gemini</span><span>DeepSeek</span><span>Groq</span><span>Ollama (free, local)</span><span>LM Studio</span></div>
+</div></section>
+
+<section id="faq" style="padding-top:20px"><div class="wrap" style="max-width:820px">
+  <div class="center"><h2>Questions</h2></div>
+  <details><summary>Is A.F.R.A free?</summary><p>Yes, the app is free to download and use. AI features use your own API key, so you pay your provider directly (often cents per paper), or use a free local model through Ollama. Literature search, quality filters, snowballing, the reference checker and many more features use no AI at all.</p></details>
+  <details><summary>Where is my data stored?</summary><p>Only on your computer, in A.F.R.A's <code>data</code> folder: your library, PDFs, drafts and API keys. It makes automatic backups every 6 hours and before anything is deleted. Only your search queries go to the scholarly databases, and only your prompts go to the AI provider you choose.</p></details>
+  <details><summary>Does it write my paper for me?</summary><p>It assists. It finds and organises evidence, checks quality and drafts text you then revise. You stay the author, and A.F.R.A never invents data or results. It includes a similarity check and an AI-use disclosure generator, because most journals accept AI assistance when it's disclosed.</p></details>
+  <details><summary>Can I use it online, without installing?</summary><p>Not at the moment. A.F.R.A runs on your own computer so that your unpublished work stays private. This website is its homepage.</p></details>
+  <details><summary>Which journals and formats are supported?</summary><p>Word export with APA 7, IEEE (two-column), a general journal-article layout, a research-report layout and the Indonesian Skripsi/Tesis format. References in APA, IEEE, Harvard, Chicago, Vancouver or MLA. The Journal fit checker reads any journal's author guidelines.</p></details>
+</div></section>
+
+<section style="padding-top:10px"><div class="wrap center" style="margin-bottom:0">
+  <img src="favicon.svg" alt="" style="width:64px;height:64px;border-radius:15px;box-shadow:0 10px 30px rgba(20,33,61,.25)">
+  <h2 style="margin-top:18px">Finish your next article with A.F.R.A</h2>
+  <div class="cta" style="justify-content:center"><a class="btn dark" href="https://github.com/farmansyah/afra/archive/refs/heads/main.zip">⬇ Download</a><a class="btn" style="border-color:var(--line);color:var(--ink)" href="https://github.com/farmansyah/afra">GitHub</a></div>
+</div></section>
+
+<footer><div class="wrap">
+  <div><img src="favicon.svg" alt="" style="width:18px;height:18px;border-radius:4px;vertical-align:-4px;margin-right:6px"><b style="color:#fff">A.F.R.A</b> · Article Finder &amp; Research Assistant</div>
+  <div>© 2026 <b style="color:#fff">danafarmansyah</b>. All rights reserved. · Crafted with <span class="heart">♥</span> · <a href="https://github.com/farmansyah/afra">GitHub</a></div>
+</div></footer>
+
+</body>
+</html>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="A.F.R.A">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6db3"/>
+      <stop offset="1" stop-color="#14213d"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <!-- A: an open-book / roof shape, the "Article" -->
+  <path d="M9.5 50 L21 14.5 L32.5 50" fill="none" stroke="#fff" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15 38 H27" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+  <!-- F: the "Finder" -->
+  <path d="M39.5 50 V14.5 H54" fill="none" stroke="#fff" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M39.5 31.5 H49" stroke="#ffc857" stroke-width="5" stroke-linecap="round"/>
+  <!-- spark: the insight it finds -->
+  <path d="M54.5 41.5 L56.2 46.3 L61 48 L56.2 49.7 L54.5 54.5 L52.8 49.7 L48 48 L52.8 46.3 Z" fill="#ffc857"/>
+</svg>
