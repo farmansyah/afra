@@ -14,8 +14,8 @@ from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import bundle, checks, claude_connect, db, phone, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
-from .citations import STYLES, bibliography, parse_bibtex, to_bibtex, to_ris
+from . import bundle, checks, claude_connect, db, phone, slides, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
+from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
 from .llm import LLMError, complete, complete_json, stream_chat
@@ -941,6 +941,26 @@ async def ask_library(body: dict):
 async def suggest_citations(body: dict):
     lib = writer.library_context(body["project_id"], query=body["text"], max_items=30, chars=500)
     return await complete_json(writer.p_suggest_citations(body["text"], lib), fast=True, task="suggest-citations")
+
+
+# ---------------------------------------------------------------- slides
+@app.get("/api/slides")
+def slides_status():
+    return slides.status()
+
+
+@app.post("/api/slides/setup")
+def slides_setup():
+    return slides.setup()
+
+
+@app.post("/api/slides/material")
+def slide_material(body: dict):
+    """A document ready for slides: citations already written out in the chosen style, plus the reference list."""
+    doc = _404(db.get_document(body["document_id"]))
+    style = body.get("style") or next((p["citation_style"] for p in db.list_projects() if p["id"] == doc["project_id"]), "apa")
+    text, cited, missing = process_citations(doc["content"] or "", db.library_map(doc["project_id"]), style)
+    return {"title": doc["title"], "style": style, "text": text, "references": bibliography(cited, style), "missing": missing}
 
 
 # ---------------------------------------------------------------- export

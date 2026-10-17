@@ -255,6 +255,14 @@ def t_export(a):
     return out
 
 
+def t_slide_material(a):
+    m = api("POST", "/api/slides/material", json={"document_id": a["document_id"], "style": a.get("citation_style")}).json()
+    out = f"# {m['title']}\n\n{m['text']}\n\n## References ({m['style'].upper()})\n" + "\n".join(f"- {r}" for r in m["references"])
+    if m["missing"]:
+        out += "\n\n(Cited but not in the library, so left out: " + ", ".join(m["missing"]) + ")"
+    return out
+
+
 def t_check_refs(a):
     p = _project(a.get("project", ""))
     r = api("POST", "/api/refcheck", json={"project_id": p["id"], "text": a.get("markdown", "")}).json()
@@ -312,6 +320,10 @@ TOOLS = {
                                                  "thesis = skripsi/tesis; default: the document's own format, else apa7"},
                      "citation_style": {"type": "string", "enum": ["apa", "ieee", "harvard", "chicago", "vancouver", "mla"]},
                      "project": PROJECT}, []),
+    "slide_material": (t_slide_material, "A document ready for a presentation: its text with citations already formatted "
+                       "(e.g. (Lee, 2020) or [1]) and the matching reference list for a final References slide.",
+                       {"document_id": S, "citation_style": {"type": "string", "enum": ["apa", "ieee", "harvard", "chicago", "vancouver", "mla"]}},
+                       ["document_id"]),
     "check_references": (t_check_refs, "Check cited papers: missing from the library, retracted, broken DOIs.",
                          {"markdown": {**S, "description": "text whose citations to check; leave out to check the whole library"},
                           "project": PROJECT}, []),
@@ -353,6 +365,18 @@ Work step by step and wait for my OK after each: (1) library check and search fo
 (2) research gap with 3-5 citations each, (3) outline (IMRaD), (4) draft each section into one document with
 [@key] citations, (5) title, abstract and keywords, (6) a strict reviewer critique, (7) export_word.
 Never invent data or results: leave [TODO: my data] where my own results belong."""),
+    "make_slides": ("Slides: turn a document into an editable PowerPoint presentation with a References slide.",
+                    [{"name": "document", "description": "Document title (leave empty to choose)", "required": False},
+                     {"name": "minutes", "description": "How long the talk is, e.g. 10 minutes", "required": False}], """\
+Make a presentation from my A.F.R.A document "{document}" (talk length: {minutes}). Find it with list_documents and
+get the content with slide_material (citations already formatted, plus the reference list).
+- If the PPT Master skill is available here (the AFRA-Slides folder in the Code tab), use it for a designed deck.
+- Otherwise create an editable .pptx file yourself: a title slide (title, my name, course, date), an outline, about
+  one content slide per minute with short bullets (not paragraphs), a table or simple chart where the document has
+  numbers, a conclusion slide, and a References slide with the reference list. Put what I should say in the
+  speaker notes. Use the document's language. If you can't create files, tell me to switch on
+  "Code execution and file creation" in Claude's Settings > Capabilities.
+Use only facts and sources from the document; never invent references."""),
     "review_my_draft": ("Check a draft in A.F.R.A: structure, argument, citations and missing references.",
                         [{"name": "document", "description": "Document title (leave empty to choose)", "required": False}], """Review my draft "{document}" (use list_documents / read_document). Check structure, argument, clarity and
 whether each claim is cited; run check_references; suggest papers for uncited claims with search_papers.

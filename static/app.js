@@ -146,6 +146,32 @@ function showHandoff(prompt) {
   $("#hcopy", box).onclick = () => { navigator.clipboard.writeText(prompt).then(() => toast("Copied", "ok")); };
   $("#hclose", box).onclick = closeModal; $("#hset", box).onclick = closeModal;
 }
+// ------------------------------------------------------------------ slides: Claude chat (quick) or PPT Master (Code tab)
+async function slidesPanel(el, title) {
+  const mod = /Mac/.test(navigator.platform) ? "⌘" : "Ctrl";
+  const quick = `Use the A.F.R.A make_slides workflow for my document "${title || "…"}". It's a 10-minute presentation.`;
+  const designer = `Make a presentation with PPT Master from my A.F.R.A document "${title || "…"}" (10 minutes, my language). Use slide_material for the text and references.`;
+  let st = {}; try { st = await api("/api/slides"); } catch { }
+  const copyBtn = (id, text) => { const b = $("#" + id, el); if (b) b.onclick = () => { navigator.clipboard.writeText(text).then(() => toast("Copied: paste it in Claude", "ok")); }; };
+  el.innerHTML = `<div class="grid g2" style="gap:12px">
+    <div class="card" style="margin:0"><h3>Quick slides <small class="muted">Claude chat</small></h3>
+      <ol class="small" style="padding-left:18px;margin:6px 0"><li>Open the Claude app, start a new chat.</li><li>Paste the request (${mod}+V). Claude reads the document through A.F.R.A and gives you an editable .pptx to download.</li></ol>
+      <div class="small muted">Needs “Code execution and file creation” on in Claude → Settings → Capabilities.</div>
+      <div class="row" style="margin-top:8px"><button class="btn primary small" id="slq">Copy request</button><a class="btn small" href="claude://">Open Claude</a></div></div>
+    <div class="card" style="margin:0"><h3>Designer slides <small class="muted">PPT Master, Code tab</small></h3>
+      ${st.installed ? `<ol class="small" style="padding-left:18px;margin:6px 0"><li>In the Claude app, open the <b>Code</b> tab and choose the folder <code style="word-break:break-all">${esc(st.folder)}</code>.</li><li>Paste the request. PPT Master designs every slide; the editable .pptx lands in that folder.</li></ol>
+        <div class="row" style="margin-top:8px"><button class="btn primary small" id="sld">Copy request</button><a class="btn small" href="claude://">Open Claude</a><button class="btn small ghost" id="slup">Update PPT Master</button></div>
+        <div class="small muted" style="margin-top:6px">PPT Master ${esc(st.version)} by Hugo He (MIT), github.com/hugohe3/ppt-master</div>`
+      : st.state === "working" ? `<div class="small"><span class="spin"></span> ${esc(st.step)}</div>`
+      : `<p class="small" style="margin:6px 0">Polished, designed decks made by <a href="https://github.com/hugohe3/ppt-master" target="_blank">PPT Master</a>, run on your Claude plan in the Code tab of the Claude app. One-time setup, about 5 minutes.</p>
+        ${st.state === "error" ? `<div class="notice bad small">${esc(st.error)}</div>` : ""}
+        <button class="btn primary small" id="slset">Set up PPT Master</button>`}</div></div>`;
+  copyBtn("slq", quick); copyBtn("sld", designer);
+  const go = async () => { await api("/api/slides/setup", { method: "POST" }); slidesPanel(el, title); };
+  const set = $("#slset", el); if (set) set.onclick = go;
+  const up = $("#slup", el); if (up) up.onclick = () => { if (confirm("Download the latest PPT Master?")) go(); };
+  if (st.state === "working") setTimeout(() => { if (el.isConnected) slidesPanel(el, title); }, 3000);
+}
 function maybeHandoff(path, body) {
   if (!claudeMode()) return;
   const p = handoffPrompt(path, body || {});
@@ -247,6 +273,7 @@ async function boot() {
   $("#newProjectBtn").onclick = newProjectDialog;
   window.addEventListener("hashchange", () => { document.body.classList.remove("nav-open"); route(); }); route();
   $("#menuBtn").onclick = () => document.body.classList.toggle("nav-open");
+  $("#main").addEventListener("click", () => document.body.classList.remove("nav-open"));  // tap beside the menu closes it
   $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("a")) document.body.classList.remove("nav-open"); });
   setInterval(refreshMeter, 20000);
   checkUpdates(false);
@@ -1051,7 +1078,7 @@ async function docEditor(id) {
   main().innerHTML = `
   <div class="page-head"><div class="row grow"><a href="#docs" class="btn ghost">← Documents</a><input type="text" id="dtitle" value="${esc(doc.title)}" style="font:600 18px var(--serif);max-width:640px"></div><span class="muted small" id="dsaved">Saved</span></div>
   <div class="toolbar">
-    <button class="btn small primary" id="dexp">Export DOCX</button><button class="btn small" id="dcite">Insert citation</button>
+    <button class="btn small primary" id="dexp">Export DOCX</button><button class="btn small" id="dslides">Slides</button><button class="btn small" id="dcite">Insert citation</button>
     <button class="btn small" id="dsugg">Suggest citations</button><button class="btn small" id="dqc">Quality check</button><button class="btn small" id="dsim">Similarity</button><button class="btn small" id="dev" title="Select an argument in the editor; find papers that back it">Find evidence</button><button class="btn small" id="dref">Check references</button><button class="btn small" id="dfit">Journal fit</button>
     <span class="sep"></span>
     <select id="dtool" style="width:210px">${Object.entries(S.meta.tools).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
@@ -1092,6 +1119,7 @@ async function docEditor(id) {
   ta.oninput = () => { preview(); changed(); }; $("#dtitle").oninput = changed; preview();
   $("#dlayout").onchange = (e) => { const v = e.target.value; $("#dwrap").className = "editor-wrap" + (v === "split" ? "" : " single"); ta.style.display = v === "preview" ? "none" : ""; $("#dprev").style.display = v === "edit" ? "none" : ""; };
   $("#dexp").onclick = () => exportDialog({ markdown: ta.value, meta: { title: "", doc_type: doc.meta?.doc_type, lang: doc.meta?.lang }, template: doc.meta?.template, filenameHint: $("#dtitle").value });
+  $("#dslides").onclick = () => { const box = modal(`<h2>Make slides</h2><div id="slp" class="small muted">Loading…</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`, true); slidesPanel($("#slp", box), $("#dtitle").value); };
   $("#dcite").onclick = () => citePicker((c) => insertAtCursor(ta, c));
   $("#dmd").onclick = () => download(new Blob([ta.value], { type: "text/markdown" }), ($("#dtitle").value || "document") + ".md");
   $("#ddel").onclick = async () => { if (!confirm("Delete this document?")) return; await api(`/api/documents/${id}`, { method: "DELETE" }); location.hash = "#docs"; };
@@ -1506,6 +1534,7 @@ VIEWS.settings = async () => {
   main().innerHTML = `<div class="page-head"><div><h1>Settings</h1><p>Stored locally in <code>data/settings.json</code>. Nothing leaves your computer except calls to the AI and search providers you choose.</p></div></div>
   <div class="card" style="margin-bottom:16px"><h3>How A.F.R.A uses AI</h3><div id="claudeBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Use on your phone</h3><div id="phoneBox" class="small muted">Checking…</div></div>
   <div class="grid g2">
     <div class="card"><h3>AI connection 1</h3>
@@ -1749,6 +1778,7 @@ VIEWS.settings = async () => {
     const np = $("#phpin"); if (np) np.onclick = () => set(np, { enabled: true, new_pin: true });
   };
   api("/api/phone").then(drawPhone).catch(() => { });
+  slidesPanel($("#slidesBox"), "");
   $("#pimp").onchange = async (e) => {
     const fd = new FormData(); fd.append("file", e.target.files[0]); toast("Importing project…");
     try { const r = await api("/api/projects/import", { body: fd }); await loadProjects(r.id); toast(`Imported “${r.name}”: ${r.papers} papers, ${r.documents} documents`, "ok"); location.hash = "#library"; }

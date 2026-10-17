@@ -39,7 +39,7 @@ With the [Claude desktop app](https://claude.ai/download), Claude does the think
 Pro/Max plan, and A.F.R.A gives it real papers, your library, your documents and the Word export.
 1. In A.F.R.A open **Settings → Connect to Claude** (the Mac installer does this already), then quit and reopen Claude.
 2. In Claude, click **+ → A.F.R.A** and pick a workflow: *Coursework / Tugas*, *Literature review*, *Find evidence*,
-   *Write a paper* or *Review my draft*. Or just ask, e.g. "find 10 Q1 papers on monetite cement and add them to my
+   *Write a paper*, *Review my draft* or *Make slides*. Or just ask, e.g. "find 10 Q1 papers on monetite cement and add them to my
    library", "write my assignment from document X, APA, 1500 words, then export it to Word".
 3. References only come from real databases, land in your A.F.R.A library, and the finished file is saved to
    *Documents/AFRA exports*.
@@ -120,6 +120,9 @@ writes your reports and paper sections. Splitting the work this way usually cuts
 - **Coursework (tugas kuliah) outlines:** *New document* → Makalah, Laporan Praktikum, Proposal Penelitian or Resume
   Jurnal, exported in Indonesian campus format: cover with university logo, course, lecturer and students (Nama + NIM),
   Kata Pengantar, Daftar Isi, BAB I…, Daftar Pustaka.
+- **Slides:** in any document click **Slides**. *Quick slides*: Claude (chat) builds an editable .pptx with a References
+  slide. *Designer slides*: [PPT Master](https://github.com/hugohe3/ppt-master) by Hugo He (MIT) in the **Code** tab of the
+  Claude app; A.F.R.A sets it up in one click (folder `AFRA-Slides` in your home folder). Both run on your Claude plan.
 - **Documents:** Markdown editor with live preview, citation picker, AI tools on selected text, similarity check
   against your library, readability score and quality check.
 - **Writing Tools:** polish, paraphrase, translate EN ↔ ID, find unsupported claims, reviewer critique, response
