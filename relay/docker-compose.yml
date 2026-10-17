@@ -1,0 +1,26 @@
+# A.F.R.A chat relay + automatic HTTPS (Caddy gets a free Let's Encrypt certificate).
+#   1. Point a domain (e.g. chat.example.com) at this server, or use <ip-with-dashes>.sslip.io
+#   2. echo "DOMAIN=chat.example.com" > .env
+#   3. docker compose up -d
+services:
+  relay:
+    build:
+      context: ..            # the A.F.R.A folder: the chat app (static/chat) is served by the relay
+      dockerfile: relay/Dockerfile
+    restart: unless-stopped
+    volumes: [relay-data:/data]
+    environment:
+      RETENTION_DAYS: "60"
+      MAX_BLOB_MB: "30"
+      PUSH_CONTACT: "mailto:${PUSH_EMAIL:-afra@localhost}"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment: [DOMAIN]
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy-data:/data, caddy-config:/config]
+    depends_on: [relay]
+volumes:
+  relay-data:
+  caddy-data:
+  caddy-config:

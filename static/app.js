@@ -411,62 +411,28 @@ async function dedication() {
   $("#dwrite", box).onclick = () => openMessages();
   setTimeout(() => { NOTES_CFG = null; }, 10 * 60 * 1000);  // next click after 10 minutes reads the newest notes
 }
-// ---- messages between the two of you: they travel with the shared library (Google Drive / iCloud), privately
+// ---- the private chat (static/chat): live through the relay on your VPS, with a copy through the shared folder
 let MSG_UNREAD = 0, MSG_OPEN = false, MSG_SEEN = null;
-const msgTime = (t) => { const d = new Date(t * 1000), now = new Date(); return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); };
-async function openMessages() {
-  const r = await api("/api/messages");
-  if (r.unread) { await api("/api/messages/read", { method: "POST" }); }
-  MSG_UNREAD = 0; markHeart(); MSG_OPEN = true;
-  const box = modal(`${heartTabs("msg", 0)}<div class="chat">
-    ${r.shared ? "" : `<div class="notice small" style="margin:0 0 10px">Messages reach the other person through your <b>Shared library</b>. Turn it on in <a href="#settings" onclick="closeModal()">Settings</a> on both computers; until then they stay here.</div>`}
-    <div class="chat-log" id="chatLog"></div>
-    <div class="chat-send"><textarea id="chatText" rows="2" placeholder="Write something sweet… (Enter to send, Shift+Enter for a new line)"></textarea><button class="btn primary" id="chatGo">Send</button></div>
-    <div class="small muted" style="margin-top:6px">You appear as <b id="chatMe">${esc(r.me)}</b>${location.port === "8770" ? "" : ` · <a href="#" id="chatName">change</a>`}</div></div>`, true);
+function openMessages() {
+  MSG_OPEN = true; MSG_UNREAD = 0; markHeart();
+  const box = modal(`${heartTabs("msg", 0)}<iframe src="/static/chat/index.html" title="Chat" style="width:100%;height:min(74vh,720px);border:0;border-radius:14px;display:block;background:var(--bg)"></iframe>
+    <div class="row" style="justify-content:space-between;margin-top:8px"><a class="small" href="/static/chat/index.html" target="_blank">Open in its own window ↗</a><button class="btn small" onclick="closeModal()">Close</button></div>`, true);
   bindHeartTabs(box);
-  const draw = (r) => {
-    const log = $("#chatLog", box); if (!log) return;
-    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-    log.innerHTML = r.messages.length ? r.messages.map((m) => `<div class="bubble ${m.mine ? "mine" : ""}"><div class="who">${esc(m.mine ? "You" : m.author)} · ${msgTime(m.created)}${m.mine ? ` · ${m.read ? "✓✓ read" : "✓ sent"}` : ""}${m.mine ? ` <a href="#" data-mdel="${m.id}" title="Delete">×</a>` : ""}</div>${esc(m.text).replace(/\n/g, "<br>")}</div>`).join("")
-      : `<div class="empty small">No messages yet. Say hi ♥</div>`;
-    $$("[data-mdel]", log).forEach((a) => a.onclick = async (e) => { e.preventDefault(); if (confirm("Delete this message for both of you?")) { await api(`/api/messages/${a.dataset.mdel}`, { method: "DELETE" }); draw(await api("/api/messages")); } });
-    if (atBottom || !draw.done) log.scrollTop = log.scrollHeight; draw.done = true;
-  };
-  draw(r);
-  const send = async () => {
-    const t = $("#chatText", box).value.trim(); if (!t) return;
-    if (!S.settings?.chat_name && location.port !== "8770") {  // first message: a real name instead of the computer's
-      const v = prompt("Which name should they see on your messages?", ""); if (!v || !v.trim()) return;
-      S.settings = await api("/api/settings", { method: "PUT", body: { chat_name: v.trim() } }); $("#chatMe", box).textContent = v.trim();
-    }
-    $("#chatText", box).value = ""; draw(await api("/api/messages", { body: { text: t } }));
-  };
-  $("#chatGo", box).onclick = send;
-  $("#chatText", box).onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
-  $("#chatText", box).focus();
-  const nm = $("#chatName", box);
-  if (nm) nm.onclick = async (e) => {
-    e.preventDefault(); const v = prompt("Your name on messages:", r.me); if (v === null) return;
-    S.settings = await api("/api/settings", { method: "PUT", body: { chat_name: v.trim() } }); $("#chatMe", box).textContent = v.trim() || r.me;
-  };
-  const tick = async () => {
-    if (!MSG_OPEN || !$("#chatLog")) { MSG_OPEN = false; return; }
-    try { const n = await api("/api/messages"); if (n.unread) await api("/api/messages/read", { method: "POST" }); draw(n); } catch { }
-    setTimeout(tick, 4000);
-  };
-  setTimeout(tick, 4000);
+  const watch = setInterval(() => { if (!$("iframe[title=Chat]")) { MSG_OPEN = false; clearInterval(watch); pollMessages(); } }, 1000);
 }
 function markHeart() { $$(".dedi-heart").forEach((h) => h.classList.toggle("has-msg", MSG_UNREAD > 0)); }
 async function pollMessages() {
-  if (document.hidden || MSG_OPEN && $("#chatLog")) return;
-  MSG_OPEN = false;
-  let r; try { r = await api("/api/messages?limit=1"); } catch { return; }
-  if (MSG_SEEN !== null && r.unread > MSG_UNREAD && r.messages.length && !r.messages[0].mine) {
-    const m = r.messages[0], t = document.createElement("div");
-    t.className = "toast ok"; t.style.cursor = "pointer"; t.innerHTML = `💌 <b>${esc(m.author)}</b>: ${esc(m.text.slice(0, 80))}${m.text.length > 80 ? "…" : ""}`;
-    t.onclick = () => { t.remove(); openMessages(); }; $("#toasts").appendChild(t); setTimeout(() => t.remove(), 9000);
+  if (document.hidden || MSG_OPEN) return;
+  let st; try { st = await api("/api/chat/status"); } catch { return; }
+  if (MSG_SEEN !== null && st.unread > MSG_UNREAD) {
+    let m = null; try { const r = await api("/api/chat?limit=1"); m = r.messages[0]; } catch { }
+    if (m && m.author !== st.me) {
+      const t = document.createElement("div"), body = m.text || { image: "📷 Photo", voice: "🎤 Voice note", file: "📎 File" }[m.kind] || "New message";
+      t.className = "toast ok"; t.style.cursor = "pointer"; t.innerHTML = `💌 <b>${esc(m.author)}</b>: ${esc(body.slice(0, 80))}${body.length > 80 ? "…" : ""}`;
+      t.onclick = () => { t.remove(); openMessages(); }; $("#toasts").appendChild(t); setTimeout(() => t.remove(), 9000);
+    }
   }
-  MSG_SEEN = true; MSG_UNREAD = r.unread; markHeart();
+  MSG_SEEN = true; MSG_UNREAD = st.unread; markHeart();
 }
 document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
 const needLLM = () => claudeMode() ? `<div class="notice info">AI work runs in the <b>Claude app</b> on your Claude plan: AI buttons here hand the job to Claude, which saves the result back into A.F.R.A. <a href="#settings">Settings</a></div>` : llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;

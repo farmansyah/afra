@@ -1,0 +1,11 @@
+{
+  "name": "A.F.R.A ♥",
+  "short_name": "A.F.R.A ♥",
+  "description": "A private chat for two.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14213d",
+  "theme_color": "#14213d",
+  "icons": [{"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]
+}

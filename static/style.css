@@ -265,7 +265,7 @@ table.lib tr:hover td { background: var(--panel-2); cursor: pointer; }
   .modal-box, .modal-box.wide { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
 }
 
-/* the heart window: a note, and messages between the two of you */
+/* the heart window: a note, and the private chat (static/chat) */
 .dedi-heart { position: relative; }
 .dedi-heart.has-msg::after { content: ""; position: absolute; top: -1px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; box-shadow: 0 0 0 2px var(--panel); }
 .dedi-heart.has-msg { animation: beat 1.2s ease-in-out infinite; }
@@ -273,11 +273,3 @@ table.lib tr:hover td { background: var(--panel-2); cursor: pointer; }
 .dedi-tabs button { border: 0; background: none; padding: 6px 12px; border-radius: 999px; font: 600 13px var(--sans); color: var(--muted); cursor: pointer; }
 .dedi-tabs button.on { background: var(--accent-soft); color: var(--ink); }
 .dedi-badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 999px; background: #e5484d; color: #fff; font-size: 11px; line-height: 18px; }
-.chat { max-width: 560px; margin: 0 auto; }
-.chat-log { height: min(52vh, 440px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
-.bubble { max-width: 80%; padding: 8px 12px; border-radius: 16px 16px 16px 4px; background: var(--panel); border: 1px solid var(--line); align-self: flex-start; font-family: var(--serif); font-size: 15px; line-height: 1.5; color: var(--ink); white-space: normal; overflow-wrap: anywhere; }
-.bubble.mine { align-self: flex-end; border-radius: 16px 16px 4px 16px; background: var(--accent-soft); }
-.bubble .who { font: 500 11px var(--sans); color: var(--muted); margin-bottom: 2px; }
-.bubble .who a { color: var(--muted); text-decoration: none; margin-left: 4px; }
-.chat-send { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
-.chat-send textarea { flex: 1; resize: none; }

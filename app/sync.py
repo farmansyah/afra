@@ -278,11 +278,15 @@ def _import(folder: Path, me: dict) -> int:
 
 
 def _pdfs(folder: Path):
-    shared, local = folder / "pdfs", db.PDF_DIR
+    _files(folder / "pdfs", db.PDF_DIR, ".pdf")
+    _files(folder / "chat", DATA_DIR / "chat", "")  # chat photos, files and voice notes
+
+
+def _files(shared: Path, local: Path, suffix: str):
     shared.mkdir(parents=True, exist_ok=True)
     local.mkdir(parents=True, exist_ok=True)
-    theirs = {e.name: e.stat().st_mtime for e in os.scandir(shared) if e.name.endswith(".pdf") and not e.name.startswith(".")}
-    ours = {e.name: e.stat().st_mtime for e in os.scandir(local) if e.name.endswith(".pdf")}
+    theirs = {e.name: e.stat().st_mtime for e in os.scandir(shared) if e.is_file() and e.name.endswith(suffix) and not e.name.startswith(".")}
+    ours = {e.name: e.stat().st_mtime for e in os.scandir(local) if e.is_file() and e.name.endswith(suffix) and not e.name.endswith(".tmp")}
     for name, mtime in ours.items():  # new or replaced here
         if name not in theirs or mtime > theirs[name] + 2:
             tmp = shared / f".~{name}"
