@@ -168,9 +168,7 @@ def main():
     icon.resize((512, 512), Image.LANCZOS).save(ROOT / "static" / "icon-512.png")
     canvas = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))  # macOS icon grid: ~824px tile on a 1024 canvas
     canvas.paste(icon.resize((824, 824), Image.LANCZOS), (100, 100))
-    res = ROOT / "AFRA.app" / "Contents" / "Resources"
-    res.mkdir(parents=True, exist_ok=True)
-    canvas.save(res / "AFRA.icns", sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
+    canvas.save(ROOT / "static" / "AFRA.icns", sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
     print("logos:", ", ".join(STYLES), "| favicon + Mac icon:", a.mac, "| garnish:", a.garnish)
 
 

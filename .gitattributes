@@ -1,7 +1,6 @@
 * text=auto
 *.command text eol=lf
 *.sh text eol=lf
-AFRA.app/Contents/MacOS/* text eol=lf
 *.plist text eol=lf
 *.bat text eol=crlf
 *.svg text

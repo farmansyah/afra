@@ -1435,7 +1435,9 @@ VIEWS.settings = async () => {
       <div class="card"><h3>Journal quartiles (SJR)</h3>
         <p class="small muted" style="margin-top:0">${S.meta.sjr_journals ? `<b style="color:var(--ok)">✓ ${S.meta.sjr_journals.toLocaleString()} journals loaded.</b> ` : ""}For official Q1–Q4 quartiles: open <a href="https://www.scimagojr.com/journalrank.php" target="_blank">scimagojr.com/journalrank.php</a>, click <b>Download data</b> (top right), then choose that file here. Do this once a year. Without it, quartiles are estimated from OpenAlex.</p>
         <label class="btn">Import SCImago file (.csv)<input type="file" id="sjrf" accept=".csv,.txt" hidden></label></div>
-      <div class="card"><h3>Updates</h3><div id="upd" class="small muted">Checking…</div></div>
+      <div class="card"><h3>Use with your Claude plan</h3><div id="claudeBox" class="small muted">Checking…</div></div>
+      <div class="card"><h3>Updates</h3><div id="upd" class="small muted">Checking…</div>
+        <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="autoupd" ${S.settings.auto_update === false ? "" : "checked"}> Install updates automatically while I'm not working</label></div>
       <div class="card"><h3>Your data & backups</h3><div id="bk" class="small muted">Loading…</div></div>
       <div class="card"><h3>Project</h3><label class="f">Name</label><input type="text" id="pname" value="${esc(S.project.name)}">
         <div class="row" style="margin-top:10px"><button class="btn" id="prename">Rename</button><button class="btn danger" id="pdel">Delete project…</button></div></div>
@@ -1555,6 +1557,19 @@ VIEWS.settings = async () => {
     const c = $("#updchk"); if (c) c.onclick = (e) => busy(e.currentTarget, async () => drawUpd(await checkUpdates(true), ver));
   };
   api("/api/version").then(async (ver) => drawUpd(await checkUpdates(true), ver));
+  $("#autoupd").onchange = async (e) => { S.settings = await api("/api/settings", { method: "PUT", body: { auto_update: e.target.checked } }); toast(e.target.checked ? "Automatic updates on" : "Automatic updates off", "ok"); };
+  const drawClaude = (c) => {
+    const box = $("#claudeBox"); if (!box) return;
+    const how = `In Claude, click <b>+</b> → <b>A.F.R.A</b> and pick a workflow (Coursework / Tugas, Literature review, Find evidence, Write a paper, Review my draft), or just ask Claude to find papers, write into your documents and export to Word.`;
+    box.innerHTML = c.connected
+      ? `<div style="color:var(--ok)">✓ Connected to the Claude app.</div><p>${how}</p><p>If A.F.R.A doesn't show up in Claude yet, quit Claude completely and open it again.</p>`
+      : `<p style="margin-top:0">Let Claude do the AI work on your <b>Claude Pro/Max plan</b>, with no API key: Claude finds real papers through A.F.R.A, writes into your documents and exports Word files.</p>
+         ${c.claude_installed ? "" : `<p>First install the <a href="https://claude.ai/download" target="_blank">Claude desktop app</a> and sign in.</p>`}
+         <button class="btn primary" id="claudego">Connect to Claude</button><p>Then quit Claude and open it again. ${how}</p>`;
+    const g = $("#claudego");
+    if (g) g.onclick = () => busy(g, async () => { try { drawClaude(await api("/api/claude/connect", { method: "POST" })); toast("Connected. Quit and reopen Claude.", "ok"); } catch (err) { toast(err.message, "bad"); } });
+  };
+  api("/api/claude").then(drawClaude).catch(() => { });
   $("#prename").onclick = async () => { await api(`/api/projects/${S.project.id}`, { method: "PUT", body: { name: $("#pname").value } }); await loadProjects(S.project.id); toast("Renamed", "ok"); };
   $("#pdel").onclick = async () => {
     if (S.projects.length < 2) return toast("Can't delete the only project", "bad");

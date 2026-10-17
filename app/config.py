@@ -38,6 +38,7 @@ DEFAULTS = {
     "default_citation_style": "apa",
     "default_template": "apa7",
     "ui_theme": "navy",
+    "auto_update": True,               # installed copies update themselves while idle (never the git dev copy)
     "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
     "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }

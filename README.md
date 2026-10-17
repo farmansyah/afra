@@ -18,21 +18,36 @@ own computer, in your web browser, and keeps all your data on your computer.
    **"AFRA" shortcut** appears on your Desktop for next time.
 
 ### Mac
-1. Unzip `AFRA.zip`, for example into your Documents folder.
-2. Open **`AFRA.app`** (the blue AF icon). The first time, macOS asks because the app was downloaded:
-   **right-click → Open → Open**. On newer macOS, go to **System Settings → Privacy & Security** and click
-   **Open Anyway**. Drag `AFRA.app` to your Dock so it's always one click away.
-   - If Python isn't installed yet, a message explains what to do and the download page opens. Install Python, then
-     open `AFRA.app` again.
-3. AFRA opens in your browser. After the first time, a normal double-click is enough.
+1. Open **Terminal** (⌘ Space, type *Terminal*, Return).
+2. Paste this line and press Return:
+   ```bash
+   curl -fsSL https://farmansyah.github.io/afra/install.sh | bash
+   ```
+3. That's all. A.F.R.A opens in your browser and appears in your Dock and Applications. It runs quietly in the
+   background, starts with your Mac, and nothing needs approving under *Privacy & Security*. If you used A.F.R.A from
+   an unzipped folder before, your library is copied over. Running the line again repairs or reinstalls; add
+   `-s -- --uninstall` after `bash` to remove it (your data in `~/AFRA/data` stays).
 
 > On Windows, keep the small black window open while you work (closing it stops the app; your work is already
-> saved). On Mac, A.F.R.A runs quietly in the background: just open `AFRA.app` again to bring it back.
+> saved).
 >
-> **Updates:** when a new version is available, a yellow *Update available* button appears in the sidebar.
-> One click installs it and keeps all your data.
+> **Updates** install themselves while you're not working (Settings → Updates can switch this off). On Windows a yellow
+> *Update available* button appears in the sidebar as well.
 
-### Connect an AI model (one time)
+### Use it with your Claude Pro plan (no API key)
+With the [Claude desktop app](https://claude.ai/download), Claude does the thinking and writing on your Claude
+Pro/Max plan, and A.F.R.A gives it real papers, your library, your documents and the Word export.
+1. In A.F.R.A open **Settings → Connect to Claude** (the Mac installer does this already), then quit and reopen Claude.
+2. In Claude, click **+ → A.F.R.A** and pick a workflow: *Coursework / Tugas*, *Literature review*, *Find evidence*,
+   *Write a paper* or *Review my draft*. Or just ask, e.g. "find 10 Q1 papers on monetite cement and add them to my
+   library", "write my assignment from document X, APA, 1500 words, then export it to Word".
+3. References only come from real databases, land in your A.F.R.A library, and the finished file is saved to
+   *Documents/AFRA exports*.
+
+This works in the Claude **desktop** app (Mac and Windows). claude.ai in the browser and the phone app cannot reach
+programs on your computer.
+
+### Or connect an AI model with an API key
 Open **Settings**, choose a provider under *Quick preset*, paste your API key, and click **Test connection**.
 
 | If you have… | Choose preset | Main model (writing) | Fast model (cheap steps) |
@@ -138,6 +153,11 @@ python tools/package.py       # builds dist/AFRA.zip (keeps the Mac launcher exe
 - **Modules** in `app/`: `search` (connectors), `quality` (SJR/OpenAlex journal metrics), `discovery`
   (Discover/Evidence), `research` (deep research), `writer`, `citations`, `docx_export`, `llm` (OpenAI-compatible
   and Anthropic APIs, fast model, prompt caching, usage logging).
+- **Claude connector:** `app/mcp_server.py` is a dependency-free MCP server (stdio) that Claude Desktop starts; it
+  forwards tool calls to the running server and starts it if needed. `app/claude_connect.py` registers it in
+  `claude_desktop_config.json`.
+- **Mac install:** `docs/install.sh` (served by GitHub Pages) installs to `~/AFRA`, runs the server as a LaunchAgent
+  (`AFRA_SUPERVISED=1`, so updates restart through launchd) and builds the Dock app with `osacompile`.
 - **Data location:** `RT_DATA_DIR` overrides the data folder.
 
 ---

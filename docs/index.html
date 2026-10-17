@@ -256,11 +256,21 @@
       <li>Double-click <code>start.bat</code>. If Python is missing, the download page opens: install it and tick <b>“Add python.exe to PATH”</b>, then double-click <code>start.bat</code> again.</li>
       <li>A.F.R.A opens in your browser, and a desktop shortcut is created for next time.</li></ol></div>
     <div class="os"><h3>Mac</h3><ol>
-      <li><a href="https://github.com/farmansyah/afra/archive/refs/heads/main.zip" style="color:var(--gold)">Download</a> and unzip it, e.g. into Documents.</li>
-      <li>Open <b>AFRA.app</b> (the blue AF icon). First time only: right-click → <b>Open</b>, or <b>System Settings → Privacy &amp; Security → Open Anyway</b>.</li>
-      <li>If Python is missing, a message explains what to do. Then drag AFRA.app to your Dock: one click from now on, no windows to keep open.</li></ol></div>
+      <li>Open <b>Terminal</b> (press <b>⌘ Space</b>, type <i>Terminal</i>, press Return).</li>
+      <li>Paste this line and press Return:
+        <div style="display:flex;gap:8px;align-items:center;margin:8px 0"><code id="macline" style="flex:1;overflow-x:auto;white-space:nowrap;padding:8px 10px">curl -fsSL https://farmansyah.github.io/afra/install.sh | bash</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('macline').textContent);this.textContent='Copied'" style="cursor:pointer;padding:8px 12px;border-radius:8px;border:0;background:var(--gold);color:#14213d;font-weight:600">Copy</button></div></li>
+      <li>That's all. A.F.R.A opens in your browser and appears in your Dock. It starts with your Mac, updates itself, and nothing needs approving in Privacy &amp; Security.</li></ol></div>
   </div>
-  <p class="muted" style="text-align:center;margin-top:26px">Then open <b>Settings</b>, pick your AI provider and paste your key. The <b>Balanced</b> preset picks a strong writing model and a cheap fast model for you.</p>
+  <p class="muted" style="text-align:center;margin-top:26px">Then either use it with your <b>Claude Pro</b> plan (below, no API key), or open <b>Settings</b>, pick an AI provider and paste your key.</p>
+</div></section>
+
+<section id="claude" class="band"><div class="wrap">
+  <div class="center"><h2>Use it with your Claude Pro plan</h2><p class="muted">No API key, no extra cost. Claude does the thinking and writing; A.F.R.A gives it real papers, your library and Word export.</p></div>
+  <ol style="max-width:640px;margin:0 auto">
+    <li>Install the <a href="https://claude.ai/download" style="color:var(--gold)">Claude desktop app</a> and sign in.</li>
+    <li>In A.F.R.A, open <b>Settings → Connect to Claude</b> (the Mac installer does this for you), then quit and reopen Claude.</li>
+    <li>In Claude, click <b>+</b> → <b>A.F.R.A</b> and pick a workflow: <i>Coursework / Tugas</i>, <i>Literature review</i>, <i>Find evidence</i>, <i>Write a paper</i> or <i>Review my draft</i>. Or just ask: “find 10 Q1 papers on monetite cement and add them to my library”.</li></ol>
+  <p class="muted" style="text-align:center">Every reference comes from a real database and lands in your A.F.R.A library; the finished document is saved as a formatted Word file in Documents/AFRA exports.</p>
 </div></section>
 
 <section><div class="wrap">

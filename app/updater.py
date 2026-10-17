@@ -23,7 +23,7 @@ REPO = "farmansyah/afra"
 RAW_VERSION = f"https://raw.githubusercontent.com/{REPO}/main/app/version.py"
 ZIP_URL = f"https://codeload.github.com/{REPO}/zip/refs/heads/main"
 KEEP = ("data/", ".venv/", "dist/", ".git/")
-EXEC = ("start.sh", "Start AFRA.command", "AFRA.app/Contents/MacOS/AFRA")
+EXEC = ("start.sh", "Start AFRA.command", "docs/install.sh")
 
 
 def is_dev_copy() -> bool:
@@ -95,6 +95,8 @@ async def apply() -> dict:
 
 def restart():
     """Start a fresh server process (it waits for this one to free the port), then exit."""
+    if os.environ.get("AFRA_SUPERVISED"):  # the Mac background service: launchd starts the new code by itself
+        os._exit(0)
     args = [a for a in sys.argv if a != "--no-browser"] + ["--no-browser"]
     env = dict(os.environ, AFRA_WAIT_PORT="1")
     kw = {"cwd": str(BASE_DIR), "env": env}

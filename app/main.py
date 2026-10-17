@@ -13,7 +13,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import checks, db, discovery, gaps, integrations, models, quality, research, updater, writer
+from . import checks, claude_connect, db, discovery, gaps, integrations, models, quality, research, updater, writer
 from .citations import STYLES, bibliography, parse_bibtex, to_bibtex, to_ris
 from .config import BASE_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -49,14 +49,36 @@ async def _file_sync_loop():
                 print("auto-export failed:", e)
 
 
+LAST_EDIT = [time.time()]  # when the user last changed something (saves, imports...)
+
+
+async def _auto_update_loop():
+    """Installed copies keep themselves up to date: check a minute after starting, then every 6 h, and install
+    only while nobody has changed anything for 20 minutes, so an update never lands in the middle of typing."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            if get_settings().get("auto_update", True) and not updater.is_dev_copy() and time.time() - LAST_EDIT[0] > 1200:
+                if (await updater.check())["available"]:
+                    await asyncio.to_thread(db.backup, "before-update")
+                    print("auto-update:", await updater.apply())
+                    updater.restart()
+        except Exception as e:  # offline, GitHub down...: try again next round
+            print("auto-update skipped:", e)
+        await asyncio.sleep(6 * 3600)
+
+
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_file_sync_loop())
+    asyncio.create_task(_auto_update_loop())
 
 
 @app.middleware("http")
 async def no_stale_frontend(request, call_next):
+    if request.method != "GET" and request.url.path.startswith("/api/"):
+        LAST_EDIT[0] = time.time()
     # the UI changes with updates; make the browser revalidate instead of running an old cached copy
     response = await call_next(request)
     if request.url.path == "/" or request.url.path.startswith("/static/"):
@@ -119,6 +141,16 @@ async def update_apply():
     result = await updater.apply()
     asyncio.get_running_loop().call_later(1.5, updater.restart)  # respond first, then restart on the new code
     return result
+
+
+@app.get("/api/claude")
+def claude_status():
+    return claude_connect.status()
+
+
+@app.post("/api/claude/connect")
+def claude_connect_ep():
+    return claude_connect.connect()
 
 
 @app.get("/api/settings")
