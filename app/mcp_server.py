@@ -198,11 +198,20 @@ def t_read(a):
 
 
 def t_save(a):
+    if not a.get("markdown") and not a.get("starter"):
+        raise RuntimeError("Give the document text (markdown), or a starter outline.")
     if a.get("document_id"):
         d = api("PUT", f"/api/documents/{a['document_id']}", json={"title": a.get("title"), "content": a["markdown"]}).json()
         return f"Saved '{d['title']}' (id {d['id']}). The user sees it under Documents in A.F.R.A."
     p = _project(a.get("project", ""))
-    d = api("POST", f"/api/projects/{p['id']}/documents", json={"title": a.get("title") or "Untitled", "content": a["markdown"]}).json()
+    body = {"title": a.get("title") or "Untitled", "content": a.get("markdown", "")}
+    if a.get("starter"):  # coursework outline + its Word format; markdown (if given) replaces the outline text
+        d = api("POST", f"/api/projects/{p['id']}/documents", json={"starter": a["starter"], "title": a.get("title")}).json()
+        if a.get("markdown"):
+            d = api("PUT", f"/api/documents/{d['id']}", json={"content": a["markdown"]}).json()
+        return (f"Created '{d['title']}' (id {d['id']}) in '{p['name']}' as a {a['starter']} (tugas Word format).\n\n"
+                + ("" if a.get("markdown") else "Outline:\n" + d["content"]))
+    d = api("POST", f"/api/projects/{p['id']}/documents", json=body).json()
     return f"Created '{d['title']}' (id {d['id']}) in project '{p['name']}'. The user sees it under Documents in A.F.R.A."
 
 
@@ -223,11 +232,15 @@ def t_export(a):
     else:
         project_id, markdown, title = _project(a.get("project", ""))["id"], a["markdown"], a.get("title") or "document"
     meta = {"title": a.get("title") or title}
-    for k in ("authors", "affiliation", "keywords"):
+    for k in ("authors", "affiliation", "keywords", "course", "instructor", "student_id", "department", "city", "date", "doc_type"):
         if a.get(k):
             meta[k] = a[k]
-    r = api("POST", "/api/export/docx", json={"project_id": project_id, "markdown": markdown, "meta": meta,
-                                             "template": a.get("template", "apa7"), "style": a.get("citation_style")})
+    tpl = a.get("template") or (d.get("meta", {}).get("template") if a.get("document_id") else None) or "apa7"
+    if a.get("document_id") and d.get("meta", {}).get("doc_type"):
+        meta.setdefault("doc_type", d["meta"]["doc_type"])
+    lang = a.get("language") or ("id" if tpl in ("tugas", "thesis") else "en")
+    r = api("POST", "/api/export/docx", json={"project_id": project_id, "markdown": markdown, "meta": meta, "template": tpl,
+                                             "style": a.get("citation_style"), "options": {"lang": lang}})
     name = re.sub(r"[^\w\- ]+", "", meta["title"]).strip()[:80] or "document"
     path = _export_dir() / f"{name}.docx"
     path.write_bytes(r.content)
@@ -272,21 +285,31 @@ TOOLS = {
     "library": (t_library, "List the papers saved in a project, with their cite keys.",
                 {"project": PROJECT, "filter": {**S, "description": "optional word to filter by"},
                  "abstract_chars": {"type": "integer", "default": 0, "description": "how much abstract to include"}}, []),
-    "add_papers": (t_add, "Save papers to the project library by DOI or arXiv id. Returns the cite key of each.",
+    "add_papers": (t_add, "Save papers or books to the project library by DOI, arXiv id or ISBN (books: read the ISBN from a photo "
+                   "of the back cover if the user sends one). Returns the cite key of each.",
                    {"identifiers": {"type": "array", "items": S}, "project": PROJECT}, ["identifiers"]),
     "read_paper": (t_paper, "Details of one library paper: full abstract, the user's notes and, if asked, the full text (open-access PDF).",
                    {"key": {**S, "description": "cite key, e.g. smith2020deep"}, "fulltext": {"type": "boolean", "default": False},
                     "project": PROJECT}, ["key"]),
     "list_documents": (t_documents, "List the user's documents (drafts, assignments, papers) in a project.", {"project": PROJECT}, []),
     "read_document": (t_read, "Read a document's Markdown text.", {"document_id": S}, ["document_id"]),
-    "save_document": (t_save, "Create a document, or replace an existing one's text (give document_id). Markdown with [@key] citations.",
+    "save_document": (t_save, "Create a document, or replace an existing one's text (give document_id). Markdown with [@key] citations. "
+                      "For coursework pass starter (makalah, praktikum, proposal, resume) to get the campus outline and Word format.",
                       {"markdown": S, "title": S, "document_id": {**S, "description": "to update an existing document"},
-                       "project": PROJECT}, ["markdown"]),
+                       "starter": {"type": "string", "enum": ["makalah", "praktikum", "proposal", "resume"]},
+                       "project": PROJECT}, []),
     "export_word": (t_export, "Make a formatted Word (.docx) file with citations and the reference list, saved in Documents/AFRA exports.",
                     {"document_id": {**S, "description": "export a saved document"}, "markdown": {**S, "description": "or export this text"},
-                     "title": S, "authors": S, "affiliation": S, "keywords": S,
-                     "template": {"type": "string", "enum": ["apa7", "ieee", "journal", "thesis", "report"], "default": "apa7",
-                                  "description": "thesis = Indonesian skripsi/tesis format"},
+                     "title": S, "authors": {**S, "description": "several students: 'Name (NIM); Name (NIM)'"},
+                     "affiliation": {**S, "description": "university"}, "keywords": S,
+                     "course": {**S, "description": "mata kuliah (tugas cover)"}, "instructor": {**S, "description": "dosen pengampu"},
+                     "student_id": {**S, "description": "NIM (single author)"}, "department": {**S, "description": "program studi / fakultas"},
+                     "city": S, "date": {**S, "description": "e.g. the year"},
+                     "doc_type": {**S, "description": "cover heading for tugas: MAKALAH, LAPORAN PRAKTIKUM, PROPOSAL PENELITIAN, RESUME JURNAL..."},
+                     "language": {"type": "string", "enum": ["id", "en"], "description": "labels: Daftar Pustaka/BAB or References/Chapter"},
+                     "template": {"type": "string", "enum": ["apa7", "ieee", "journal", "thesis", "tugas", "report"],
+                                  "description": "tugas = Indonesian coursework (cover with logo, Kata Pengantar, Daftar Isi, BAB I...); "
+                                                 "thesis = skripsi/tesis; default: the document's own format, else apa7"},
                      "citation_style": {"type": "string", "enum": ["apa", "ieee", "harvard", "chicago", "vancouver", "mla"]},
                      "project": PROJECT}, []),
     "check_references": (t_check_refs, "Check cited papers: missing from the library, retracted, broken DOIs.",
@@ -316,7 +339,9 @@ Length: {length}. Citation style: {style}.
 2. Find 6-12 real, recent sources with search_papers and add_papers them.
 3. Write in my own clear student voice, in the language of the assignment, citing with [@key].
    Explain ideas, don't just stack quotes.
-4. save_document, check_references, then export_word with the right style (template "apa7", or "thesis" for Indonesian format)."""),
+4. save_document (with starter "makalah", "praktikum", "proposal" or "resume" when it is that kind of tugas), check_references,
+   then export_word: template "tugas" for an Indonesian campus assignment (ask me for course, lecturer, names + NIM,
+   program studi, university, city, year for the cover), or "apa7" for an English essay."""),
     "find_evidence": ("Find papers that support (or contradict) a claim, with the sentence that backs it.",
                       [{"name": "claim", "description": "Your argument or sentence", "required": True}], """Find evidence for this claim: {claim}
 Search with 4-6 queries for supporting studies and 1-2 for contradicting ones. For each relevant paper give:

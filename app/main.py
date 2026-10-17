@@ -10,10 +10,11 @@ import httpx
 import time
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import checks, claude_connect, db, discovery, gaps, integrations, models, quality, research, updater, writer
+from . import bundle, checks, claude_connect, db, phone, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
 from .citations import STYLES, bibliography, parse_bibtex, to_bibtex, to_ris
 from .config import BASE_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -24,6 +25,7 @@ from .search import (SOURCES, fetch_page, journals_for_topic, lookup_identifier,
 app = FastAPI(title="A.F.R.A: Article Finder & Research Assistant", description="(c) 2026 danafarmansyah. All rights reserved.")
 STATIC = BASE_DIR / "static"
 db.init()
+sync.init()
 
 
 async def _backup_loop():
@@ -68,11 +70,55 @@ async def _auto_update_loop():
         await asyncio.sleep(6 * 3600)
 
 
+async def _sync_loop():
+    """Shared library: send our changes to the shared folder and pick up the other computers' every few seconds."""
+    while True:
+        if sync.enabled():
+            await asyncio.to_thread(sync.run_once)
+        await asyncio.sleep(8)
+
+
 @app.on_event("startup")
 async def _startup():
+    asyncio.create_task(_sync_loop())
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_file_sync_loop())
     asyncio.create_task(_auto_update_loop())
+    if get_settings().get("phone_access"):
+        phone.start(app)
+
+
+PHONE_LOGIN = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.F.R.A</title><link rel="apple-touch-icon" href="/static/icon-512.png"><style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#14213d;color:#f6f5f1;font:16px system-ui,sans-serif}
+form{width:min(320px,88vw);text-align:center}img{width:72px;border-radius:16px}h1{font:600 24px Georgia,serif;margin:12px 0 4px}
+p{opacity:.75;font-size:14px}input{width:100%;box-sizing:border-box;font-size:28px;letter-spacing:8px;text-align:center;padding:12px;
+border-radius:12px;border:0;margin:14px 0}button{width:100%;padding:14px;border:0;border-radius:12px;background:#ffc857;color:#14213d;
+font-weight:700;font-size:16px}#e{color:#ffb4a8;min-height:20px}</style></head><body><form id="f">
+<img src="/static/icon-512.png" alt=""><h1>A.F.R.A</h1><p>Enter the PIN shown on your computer under<br>Settings &rsaquo; Use on your phone</p>
+<input id="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="6" autofocus><div id="e"></div><button>Open</button></form>
+<script>document.getElementById("f").onsubmit=async(e)=>{e.preventDefault();const r=await fetch("/api/phone/login",{method:"POST",
+headers:{"content-type":"application/json"},body:JSON.stringify({pin:document.getElementById("pin").value})});
+if(r.ok)location.href="/";else document.getElementById("e").textContent=(await r.json()).detail;};</script></body></html>"""
+
+
+@app.middleware("http")
+async def phone_gate(request: Request, call_next):
+    """Requests through the phone door (port 8770) need the PIN cookie and cannot touch settings, keys or updates."""
+    if phone.is_phone(request):
+        path = request.url.path
+        if path == "/api/phone/login":
+            pass
+        elif not phone.cookie_ok(request.cookies.get(phone.COOKIE)):
+            if path.startswith("/static/"):
+                pass
+            elif path.startswith("/api/"):
+                return JSONResponse({"detail": "Enter the PIN first."}, status_code=401)
+            else:
+                return HTMLResponse(PHONE_LOGIN)
+        elif phone.locked(path, request.method):
+            return JSONResponse({"detail": "For safety this can only be changed on the computer itself."}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -120,6 +166,7 @@ def _stream(prompt, system="", task="chat", **kw):
 def meta():
     return {"styles": {k: v["name"] for k, v in STYLES.items()},
             "templates": {k: v["name"] for k, v in TEMPLATES.items()},
+            "starters": {k: v["name"] for k, v in starters.STARTERS.items()},
             "sources": SOURCES, "tools": {k: v[0] for k, v in writer.TOOLS.items()},
             "rubric": writer.RUBRIC, "gate": writer.GATE, "sjr_journals": quality.sjr_count()}
 
@@ -153,9 +200,52 @@ def claude_connect_ep():
     return claude_connect.connect()
 
 
+@app.get("/api/sync")
+def sync_status():
+    return sync.status()
+
+
+@app.get("/api/sync/folders")
+def sync_folders(provider: str):
+    return sync.folders(provider)
+
+
+@app.post("/api/sync/enable")
+async def sync_enable(body: dict):
+    return await asyncio.to_thread(sync.enable, body.get("provider", ""), body.get("path", ""), body.get("name", ""))
+
+
+@app.post("/api/sync/disable")
+def sync_disable():
+    return sync.disable()
+
+
+@app.post("/api/sync/now")
+async def sync_now():
+    return await asyncio.to_thread(sync.run_once)
+
+
+@app.get("/api/phone")
+def phone_status():
+    return phone.status()
+
+
+@app.post("/api/phone")
+async def phone_set(body: dict):
+    return await asyncio.to_thread(phone.enable, app, bool(body.get("enabled")), bool(body.get("new_pin")))
+
+
+@app.post("/api/phone/login")
+def phone_login(request: Request, body: dict):
+    token = phone.login(str(body.get("pin", "")), request.client.host if request.client else "?")
+    r = JSONResponse({"ok": True})
+    r.set_cookie(phone.COOKIE, token, max_age=365 * 86400, httponly=True, samesite="lax")
+    return r
+
+
 @app.get("/api/settings")
-def get_s():
-    return get_settings()
+def get_s(request: Request):
+    return phone.redact(get_settings()) if phone.is_phone(request) else get_settings()
 
 
 @app.put("/api/settings")
@@ -207,6 +297,19 @@ def create_project(body: dict):
 def update_project(pid: str, body: dict):
     db.update_project(pid, **body)
     return {"ok": True}
+
+
+@app.get("/api/projects/{pid}/bundle")
+def project_bundle(pid: str):
+    data, name = bundle.export_project(pid)
+    fname = (re.sub(r"[^\w\- ]+", "", name).strip() or "project") + ".afra"
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"})
+
+
+@app.post("/api/projects/import")
+async def project_import(file: UploadFile = File(...)):
+    return await asyncio.to_thread(bundle.import_project, await file.read())
 
 
 @app.delete("/api/projects/{pid}")
@@ -409,7 +512,8 @@ def add_papers(pid: str, body: dict):
 @app.post("/api/projects/{pid}/papers/identifier")
 async def add_by_identifier(pid: str, body: dict):
     added, failed = [], []
-    for ident in re.split(r"[\s,;]+", body.get("text", "")):
+    text = re.sub(r"\bisbn(?:-1[03])?[:\s]*", "isbn:", body.get("text", ""), flags=re.I)  # "ISBN 978-..." stays one token
+    for ident in re.split(r"[\s,;]+", text):
         if not ident.strip():
             continue
         try:
@@ -719,6 +823,9 @@ def documents(pid: str, kind: str | None = None):
 
 @app.post("/api/projects/{pid}/documents")
 def create_document(pid: str, body: dict):
+    if body.get("starter") in starters.STARTERS:  # coursework outline: Makalah, Laporan Praktikum...
+        st = starters.STARTERS[body["starter"]]
+        return db.create_document(pid, body.get("title") or st["name"], "doc", st["content"], starters.meta(body["starter"]))
     return db.create_document(pid, body.get("title") or "Untitled", body.get("kind", "doc"),
                               body.get("content", ""), body.get("meta"))
 
@@ -730,7 +837,12 @@ def get_document(doc_id: str):
 
 @app.put("/api/documents/{doc_id}")
 def update_document(doc_id: str, body: dict):
-    return _404(db.update_document(doc_id, body.get("title"), body.get("content"), body.get("meta")))
+    cur = _404(db.get_document(doc_id))
+    # the editor says which version it started from: if the document changed since (the other computer of a shared
+    # library, or Claude), don't silently overwrite it
+    if body.get("base") and not body.get("force") and cur["updated"] > float(body["base"]) + 0.001:
+        return JSONResponse({"detail": "changed elsewhere", "conflict": True, "current": cur}, status_code=409)
+    return db.update_document(doc_id, body.get("title"), body.get("content"), body.get("meta"))
 
 
 @app.delete("/api/documents/{doc_id}")
@@ -832,6 +944,43 @@ async def suggest_citations(body: dict):
 
 
 # ---------------------------------------------------------------- export
+def _logo_files():
+    from .docx_export import COVER_LOGO
+    return [COVER_LOGO, COVER_LOGO.with_suffix(".jpg")]
+
+
+@app.get("/api/cover-logo")
+def cover_logo():
+    f = next((f for f in _logo_files() if f.exists()), None)
+    if not f:
+        raise HTTPException(404, "No logo")
+    return FileResponse(f)
+
+
+@app.post("/api/cover-logo")
+async def set_cover_logo(file: UploadFile = File(...)):
+    """University logo for coursework covers (PNG or JPG, as Word embeds those directly)."""
+    data = await file.read()
+    png, jpg = _logo_files()
+    if data.startswith(b"\x89PNG"):
+        target = png
+    elif data.startswith(b"\xff\xd8"):
+        target = jpg
+    else:
+        raise ValueError("Please choose a PNG or JPG image.")
+    for f in _logo_files():
+        f.unlink(missing_ok=True)
+    target.write_bytes(data)
+    return {"ok": True}
+
+
+@app.delete("/api/cover-logo")
+def delete_cover_logo():
+    for f in _logo_files():
+        f.unlink(missing_ok=True)
+    return {"ok": True}
+
+
 @app.post("/api/export/docx")
 def export_docx(body: dict):
     library = db.library_map(body["project_id"])

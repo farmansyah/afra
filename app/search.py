@@ -347,9 +347,51 @@ async def search_crossref(q: str, limit=10, year_from=None, year_to=None) -> lis
     return [_crossref_to_paper(m) for m in r.json().get("message", {}).get("items", [])]
 
 
+def _isbn(ident: str) -> str:
+    """'978-602-...', 'ISBN:0262033844', '0-262-03384-4' -> digits (with a final X allowed), or '' if not an ISBN."""
+    raw = re.sub(r"^isbn[:\s]*", "", ident.strip(), flags=re.I)
+    if raw.lower().startswith("10."):  # a DOI
+        return ""
+    digits = re.sub(r"[\s\-]", "", raw).upper()
+    if re.fullmatch(r"97[89]\d{10}", digits):
+        return digits if sum((1 if i % 2 == 0 else 3) * int(d) for i, d in enumerate(digits)) % 10 == 0 else ""
+    if re.fullmatch(r"\d{9}[\dX]", digits):
+        return digits if sum((10 - i) * (10 if d == "X" else int(d)) for i, d in enumerate(digits)) % 11 == 0 else ""
+    return ""
+
+
+async def lookup_isbn(isbn: str) -> dict | None:
+    """Books by ISBN: Open Library first, Google Books as fallback (both free, no key)."""
+    async with _client() as c:
+        r = await c.get("https://openlibrary.org/api/books", params={"bibkeys": f"ISBN:{isbn}", "format": "json", "jscmd": "data"})
+        b = r.json().get(f"ISBN:{isbn}") if r.status_code == 200 else None
+        if b:
+            year = re.search(r"\d{4}", b.get("publish_date") or "")
+            return {"title": clean_ws(b.get("title", "") + (f": {b['subtitle']}" if b.get("subtitle") else "")),
+                    "authors": [split_name(a.get("name", "")) for a in b.get("authors", [])],
+                    "year": int(year.group()) if year else None, "type": "book",
+                    "publisher": ", ".join(x.get("name", "") for x in b.get("publishers", [])[:1]),
+                    "place": ", ".join(x.get("name", "") for x in b.get("publish_places", [])[:1]),
+                    "pages": str(b.get("number_of_pages") or ""), "isbn": isbn, "url": b.get("url", ""),
+                    "venue": "", "doi": "", "abstract": "", "source": "openlibrary"}
+        r = await c.get("https://www.googleapis.com/books/v1/volumes", params={"q": f"isbn:{isbn}"})
+        items = r.json().get("items") if r.status_code == 200 else None
+        if not items:
+            return None
+        v = items[0].get("volumeInfo", {})
+        year = re.search(r"\d{4}", v.get("publishedDate") or "")
+        return {"title": clean_ws(v.get("title", "") + (f": {v['subtitle']}" if v.get("subtitle") else "")),
+                "authors": [split_name(a) for a in v.get("authors", [])], "year": int(year.group()) if year else None,
+                "type": "book", "publisher": v.get("publisher", ""), "pages": str(v.get("pageCount") or ""), "isbn": isbn,
+                "url": v.get("infoLink", ""), "venue": "", "doi": "", "abstract": v.get("description", "")[:3000],
+                "source": "googlebooks"}
+
+
 async def lookup_identifier(ident: str) -> dict | None:
-    """Resolve a DOI, DOI URL or arXiv id/URL into a paper."""
+    """Resolve a DOI, DOI URL, arXiv id/URL or a book ISBN into a paper."""
     ident = ident.strip()
+    if isbn := _isbn(ident):
+        return await lookup_isbn(isbn)
     m = re.search(r"arxiv\.org/(?:abs|pdf)/([\w.\-/]+?)(?:v\d+)?(?:\.pdf)?$", ident) or \
         re.match(r"^(?:arxiv:)?(\d{4}\.\d{4,5})(?:v\d+)?$", ident, re.I)
     async with _client() as c:

@@ -11,6 +11,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
 from .citations import STYLES, bibliography, process_citations
+from .config import DATA_DIR
 
 ALIGN = {"left": WD_ALIGN_PARAGRAPH.LEFT, "center": WD_ALIGN_PARAGRAPH.CENTER,
          "justify": WD_ALIGN_PARAGRAPH.JUSTIFY, "right": WD_ALIGN_PARAGRAPH.RIGHT}
@@ -58,6 +59,16 @@ TEMPLATES = {
               3: dict(align="left", bold=True, before=6, after=6)},
         "ref_heading": dict(align="center", bold=True, upper=True, page_break=True), "ref_size": None, "ref_spacing": 1.0,
     },
+    "tugas": {
+        "name": "Tugas kuliah: makalah, laporan praktikum, proposal (Indonesian campus format)", "page": "a4",
+        "margins": (4, 3, 4, 3), "font": "Times New Roman", "size": 12, "spacing": 1.5, "after": 0, "indent": 1.25,
+        "align": "justify", "numbering": "chapter", "title_page": "tugas", "columns": 1, "style": "apa",
+        "page_number": "footer-center",
+        "h": {1: dict(align="center", bold=True, upper=True, page_break=True, after=18),
+              2: dict(align="left", bold=True, before=12, after=6),
+              3: dict(align="left", bold=True, before=6, after=6)},
+        "ref_heading": dict(align="center", bold=True, upper=True, page_break=True), "ref_size": None, "ref_spacing": 1.0,
+    },
     "report": {
         "name": "Research report (clean, numbered headings)", "page": "a4", "margins": (2.5, 2.5, 2.5, 2.5),
         "font": "Calibri", "size": 11, "spacing": 1.15, "after": 8, "indent": 0, "align": "justify",
@@ -71,6 +82,11 @@ TEMPLATES = {
 
 PAGE_SIZES = {"a4": (21.0, 29.7), "letter": (21.59, 27.94)}
 REF_HEADINGS = re.compile(r"^(references|reference list|bibliography|works cited|daftar pustaka|referensi|literature cited)$", re.I)
+# front/back matter that is never numbered as a chapter (Kata Pengantar comes before BAB I)
+UNNUMBERED = re.compile(r"^(kata pengantar|prakata|daftar isi|daftar tabel|daftar gambar|daftar lampiran|lampiran|"
+                        r"ucapan terima kasih|preface|foreword|acknowledge?ments?|table of contents|list of (tables|figures)|"
+                        r"appendix|appendices)$", re.I)
+COVER_LOGO = DATA_DIR / "cover-logo.png"
 ABSTRACT_HEADINGS = re.compile(r"^(abstract|abstrak|summary)$", re.I)
 NUM_PREFIX = re.compile(r"^((bab|chapter)\s+[ivxlc\d]+[.:]?\s*|[ivxlc]+\.\s+|[A-Z]\.\s+|\d+(\.\d+)*\.?\s+)", re.I)
 
@@ -362,7 +378,7 @@ class Builder:
         pos = self.t.get("page_number")
         if not pos:
             return
-        if self.t["title_page"] == "thesis":
+        if self.t["title_page"] in ("thesis", "tugas"):
             sec.different_first_page_header_footer = True  # no number on the cover
         part = sec.header if pos.startswith("header") else sec.footer
         p = part.paragraphs[0]
@@ -400,6 +416,15 @@ class Builder:
         numbering = self.o.get("numbering", t["numbering"])
         if numbering:
             text = NUM_PREFIX.sub("", text).strip()
+        if numbering and level == 1 and UNNUMBERED.match(text):  # Kata Pengantar, Lampiran...: no BAB number
+            p = self.doc.add_paragraph(style="Heading 1")
+            p.paragraph_format.page_break_before = bool(spec.get("page_break"))
+            add_inline(p, text.upper() if spec.get("upper") else text)
+            return p
+        if getattr(self, "toc_pending", False) and level == 1:  # Daftar Isi goes after the front matter, before BAB I
+            self.toc_pending = False
+            self.page_break()
+            self._toc()
         self.counters[level] += 1
         for k in range(level + 1, 7):
             self.counters[k] = 0
@@ -576,6 +601,8 @@ class Builder:
             self.blank(1)
             if kind == "report" and self.o.get("toc", True):
                 self._toc()
+        elif kind == "tugas":
+            self._cover(meta, title, authors, affil)
         elif kind == "thesis":
             self.blank(2)
             self.para(title.upper(), align="center", indent=False, size=14, base={"bold": True}, spacing=1.15)
@@ -604,9 +631,44 @@ class Builder:
                 self.page_break()
                 self._toc()
 
+    def _cover(self, meta, title, authors, affil):
+        """Indonesian coursework cover: type, title, course, lecturer, logo, students, institution, year."""
+        en = self.lang != "id"
+        doc_type = (meta.get("doc_type") or ("ASSIGNMENT" if en else "MAKALAH")).upper()
+        self.para(doc_type, align="center", indent=False, size=14, base={"bold": True}, spacing=1.15)
+        self.para(title.upper(), align="center", indent=False, size=14, base={"bold": True}, spacing=1.15)
+        self.blank(1)
+        if meta.get("course"):
+            self.para((f"Submitted to fulfil the assignment of {meta['course']}" if en
+                       else f"Diajukan untuk memenuhi tugas mata kuliah {meta['course']}"), align="center", indent=False)
+        if meta.get("instructor"):
+            self.para(("Lecturer: " if en else "Dosen Pengampu: ") + meta["instructor"], align="center", indent=False)
+        self.blank(1)
+        logo = next((p for p in (COVER_LOGO, COVER_LOGO.with_suffix(".jpg")) if p.exists()), None)
+        if logo and self.o.get("logo", True):
+            p = self.doc.add_paragraph()
+            p.alignment = ALIGN["center"]
+            p.add_run().add_picture(str(logo), width=Cm(4.5))
+            self.blank(1)
+        else:
+            self.blank(3)
+        self.para("By:" if en else "Disusun oleh:", align="center", indent=False)
+        people = [x.strip() for x in re.split(r"[;\n]", authors) if x.strip()]
+        for who in people:
+            line = who
+            if meta.get("student_id") and len(people) == 1:
+                line = f"{who} ({meta['student_id']})"
+            self.para(line, align="center", indent=False, base={"bold": True}, spacing=1.15)
+        self.blank(2)
+        for line in [meta.get("department"), affil, meta.get("city"), meta.get("date")]:
+            if line:
+                self.para(line.upper(), align="center", indent=False, base={"bold": True}, spacing=1.15)
+        self.toc_pending = self.o.get("toc", True)
+
     def _toc(self):
-        self.para(self.L["toc"].upper() if self.t["title_page"] == "thesis" else self.L["toc"],
-                  align="center" if self.t["title_page"] == "thesis" else "left", indent=False,
+        big = self.t["title_page"] in ("thesis", "tugas")
+        self.para(self.L["toc"].upper() if big else self.L["toc"],
+                  align="center" if big else "left", indent=False,
                   base={"bold": True}, after=12)
         p = self.doc.add_paragraph()
         _add_field(p, 'TOC \\o "1-3" \\h \\z \\u', "Right-click and choose 'Update Field' to build the table of contents.")

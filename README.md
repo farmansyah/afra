@@ -47,6 +47,22 @@ Pro/Max plan, and A.F.R.A gives it real papers, your library, your documents and
 This works in the Claude **desktop** app (Mac and Windows). claude.ai in the browser and the phone app cannot reach
 programs on your computer.
 
+A.F.R.A uses the Claude app by default (**Settings → How A.F.R.A uses AI**). Buttons inside A.F.R.A that need AI
+(Paper Writer, Writing Tools, reading notes…) then copy a ready request and open Claude, which does the job through
+A.F.R.A and saves the result back.
+
+### Share one library between two people
+**Settings → Shared library**: choose **Google Drive** or **iCloud Drive** and click *Start sharing*. Share that folder
+with the other person (Google Drive: *Share* → their account as Editor, and they *Add shortcut to My Drive*; iCloud:
+*Share → Collaborate*), then they click *Join* in their A.F.R.A. Everything is shared (projects, papers, notes, quotes,
+folders, PDFs, documents), on Mac and Windows, within a minute. Settings and API keys stay private. If you both edit
+the same document at the same time, both versions are kept. The database itself never sits in the cloud folder: each
+change travels as a small file, so cloud syncing can't corrupt it.
+
+### Use it on your phone
+**Settings → Use on your phone** opens A.F.R.A to phones and tablets on the same Wi-Fi, protected by a 6-digit PIN.
+Read and edit everything except settings, keys and updates. Tip: *Add to Home Screen*.
+
 ### Or connect an AI model with an API key
 Open **Settings**, choose a provider under *Quick preset*, paste your API key, and click **Test connection**.
 
@@ -86,7 +102,10 @@ writes your reports and paper sections. Splitting the work this way usually cuts
   Tavily.
 
 **Organise**
-- **Library:** one per project. Import by DOI, arXiv ID, BibTeX or PDF. Get AI reading notes. Export BibTeX or RIS
+- **Library:** one per project. Import by DOI, arXiv ID, **book ISBN**, BibTeX or PDF. (In Claude, a photo of a book's
+  back cover is enough.)
+- **Share a project as a file** (Settings → Project): one `.afra` file with papers, notes, PDFs and documents, for
+  group work. Importing never overwrites anything. Get AI reading notes. Export BibTeX or RIS
   (Mendeley, EndNote, Zotero).
 
 **Write**
@@ -98,6 +117,9 @@ writes your reports and paper sections. Splitting the work this way usually cuts
   5. Section-by-section drafting.
   6. Title, abstract and keywords.
   7. Final manuscript review.
+- **Coursework (tugas kuliah) outlines:** *New document* → Makalah, Laporan Praktikum, Proposal Penelitian or Resume
+  Jurnal, exported in Indonesian campus format: cover with university logo, course, lecturer and students (Nama + NIM),
+  Kata Pengantar, Daftar Isi, BAB I…, Daftar Pustaka.
 - **Documents:** Markdown editor with live preview, citation picker, AI tools on selected text, similarity check
   against your library, readability score and quality check.
 - **Writing Tools:** polish, paraphrase, translate EN ↔ ID, find unsupported claims, reviewer critique, response
@@ -105,8 +127,8 @@ writes your reports and paper sections. Splitting the work this way usually cuts
 
 **Finish**
 - **Export to Word (.docx)**:
-  - Templates: APA 7, IEEE (two-column), journal article, **Skripsi/Tesis** (BAB I, Daftar Isi, Daftar Pustaka) and
-    research report.
+  - Templates: APA 7, IEEE (two-column), journal article, **Skripsi/Tesis** (BAB I, Daftar Isi, Daftar Pustaka),
+    **Tugas kuliah** (cover with logo, Kata Pengantar) and research report.
   - Citation styles: APA, IEEE, Harvard, Chicago, Vancouver, MLA.
   - The reference list is generated automatically.
 
@@ -158,6 +180,10 @@ python tools/package.py       # builds dist/AFRA.zip (keeps the Mac launcher exe
   `claude_desktop_config.json`.
 - **Mac install:** `docs/install.sh` (served by GitHub Pages) installs to `~/AFRA`, runs the server as a LaunchAgent
   (`AFRA_SUPERVISED=1`, so updates restart through launchd) and builds the Dock app with `osacompile`.
+- **Shared library:** `app/sync.py`. SQLite triggers log every change; each record is written as
+  `records/<table>/<id>.json` in the shared folder (newest wins; documents edited on both sides keep a conflict copy).
+- **Phone access:** `app/phone.py`, a second uvicorn server on 0.0.0.0:8770 behind a PIN cookie (`AFRA_PHONE_HOST`
+  overrides the address for tests).
 - **Data location:** `RT_DATA_DIR` overrides the data folder.
 
 ---

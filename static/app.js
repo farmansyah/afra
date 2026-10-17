@@ -29,6 +29,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 
 // ------------------------------------------------------------------ api
 async function api(path, opts = {}) {
+  if ((opts.method || (opts.body ? "POST" : "GET")) === "POST" && !(opts.body instanceof FormData)) maybeHandoff(path, opts.body);
+  else if (opts.body instanceof FormData) maybeHandoff(path, {});
   const init = { method: opts.method || (opts.body ? "POST" : "GET"), headers: {} };
   if (opts.body instanceof FormData) init.body = opts.body;
   else if (opts.body !== undefined) { init.body = JSON.stringify(opts.body); init.headers["content-type"] = "application/json"; }
@@ -42,6 +44,7 @@ async function api(path, opts = {}) {
   return ct.includes("json") ? r.json() : r;
 }
 async function streamText(path, body, onChunk) {
+  maybeHandoff(path, body);
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
   if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail; } catch { } throw new Error(m); }
   const reader = r.body.getReader(); const dec = new TextDecoder(); let full = "";
@@ -60,12 +63,13 @@ function toast(msg, kind = "") {
 async function busy(btn, fn) {
   const html = btn.innerHTML, spinning = `<span class="spin"></span>${html}`;
   btn.disabled = true; btn.innerHTML = spinning;
-  try { return await fn(); } catch (e) { toast(e.message, "bad"); console.error(e); }
+  try { return await fn(); } catch (e) { if (e.handoff) return; toast(e.message, "bad"); console.error(e); }
   finally { if (btn.innerHTML === spinning) { btn.disabled = false; btn.innerHTML = html; } }  // keep a label the action set (e.g. "✓ added")
 }
 const debounce = (fn, ms = 800) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 function download(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
 const fmtDate = (t) => new Date(t * 1000).toLocaleString();
+const ago = (t) => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : fmtDate(t); };
 const wordCount = (s) => (String(s || "").replace(/\[[^\]]*@[^\]]*\]/g, "").match(/\b\w+\b/g) || []).length;
 
 // ------------------------------------------------------------------ markdown
@@ -97,6 +101,57 @@ function closeModal() { $("#modal").classList.add("hidden"); $("#modalBox").inne
 $("#modal").addEventListener("mousedown", (e) => { if (e.target.id === "modal") closeModal(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 
+// ------------------------------------------------------------------ Claude mode: AI work happens in the Claude app
+// (on the user's Claude Pro/Max plan, through the A.F.R.A connector), so these buttons hand the job over instead.
+class Handoff extends Error { constructor() { super("Continued in the Claude app"); this.handoff = true; } }
+const claudeMode = () => (S.settings?.ai_mode || "claude") === "claude";
+const projName = () => S.project ? `A.F.R.A project "${S.project.name}"` : "my A.F.R.A library";
+const clip = (t, n = 6000) => (t || "").length > n ? t.slice(0, n) + "\n[…]" : (t || "");
+const docTitle = () => ($("#dtitle")?.value || $("#ptitle")?.value || "").trim();
+function handoffPrompt(path, body = {}) {
+  let m;
+  if ((m = path.match(/^\/api\/papers\/([^/]+)\/summarize/))) return `Read the paper ${body.key ? "@" + body.key : "I just opened"} in ${projName()} (read_paper, with full text if available) and write my reading notes: aim, methods, key findings with numbers, limitations, and how I could cite it.`;
+  if (path === "/api/tools/run") {
+    const label = S.meta?.tools?.[body.tool] || body.tool;
+    return `${label}${body.language ? ` (language: ${body.language})` : ""}${body.extra ? `. Extra instructions: ${body.extra}` : ""}. Return only the result.
+
+<text>
+${clip(body.text)}
+</text>${docTitle() ? `
+
+It comes from my document "${docTitle()}" in ${projName()}; you may update it there with save_document if I ask.` : ""}`;
+  }
+  if (path === "/api/tools/ask-library") return `Answer from the papers in ${projName()} only (use library and read_paper), citing each claim with [@key]:
+${body.question}`;
+  if (path === "/api/tools/suggest-citations") return `Suggest which papers from ${projName()} (or new ones via search_papers) should be cited in this text, sentence by sentence, and give the text back with [@key] citations inserted:
+
+${clip(body.text)}`;
+  if (path === "/api/evidence") return `Use the A.F.R.A find_evidence workflow for this claim (save good papers to ${projName()}):
+${body.claim}`;
+  if (path === "/api/research/start" || path === "/api/research/clarify") return body.query ? `Use the A.F.R.A literature_review workflow on: ${body.query}
+Save sources to ${projName()} and the review as a document.` : null;
+  if (path === "/api/gaps/analyze" || /^\/api\/gaps\/[^/]+\/write$/.test(path)) return `Find the research gaps for my topic${body.topic ? `: ${body.topic}` : ""}. Search widely with search_papers and citation_trail, show what is well covered and what is missing (each gap backed by 3-5 citations), save the papers to ${projName()} and the analysis as a document.`;
+  if (path.startsWith("/api/manuscript/analyze")) return `I'll attach my manuscript. Review it like a strict journal reviewer, then find missing literature with search_papers and add it to ${projName()}.`;
+  if (path.startsWith("/api/paper/")) return `Use the A.F.R.A write_paper workflow for my research article "${docTitle() || "my manuscript"}" in ${projName()}. Read what I already have (list_documents / read_document) and continue from the step I'm on.`;
+  if (path.startsWith("/api/journal-fit") && body.ai !== false) return `Check whether my document "${docTitle()}" in ${projName()} fits the journal I'm targeting: scope, length, structure, reference style. Read it with read_document.`;
+  return null;
+}
+function showHandoff(prompt) {
+  try { navigator.clipboard.writeText(prompt); } catch { }
+  const box = modal(`<h3 style="margin-top:0">Continue in the Claude app</h3>
+    <p class="small muted" style="margin-top:0">A.F.R.A uses your Claude plan for AI work. The request below is <b>copied</b>: open Claude, start a new chat and paste it (${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}+V). Claude uses A.F.R.A to read your library and save the result here.</p>
+    <textarea readonly style="width:100%;height:170px;font-size:12px">${esc(prompt)}</textarea>
+    <div class="row" style="margin-top:10px"><a class="btn primary" href="claude://" id="hopen">Open Claude</a><button class="btn" id="hcopy">Copy again</button><button class="btn ghost" id="hclose">Close</button>
+    <span class="small muted" style="margin-left:auto">Prefer an API key? <a href="#settings" id="hset">Settings</a></span></div>`);
+  $("#hcopy", box).onclick = () => { navigator.clipboard.writeText(prompt).then(() => toast("Copied", "ok")); };
+  $("#hclose", box).onclick = closeModal; $("#hset", box).onclick = closeModal;
+}
+function maybeHandoff(path, body) {
+  if (!claudeMode()) return;
+  const p = handoffPrompt(path, body || {});
+  if (p) { showHandoff(p); throw new Handoff(); }
+}
+
 // ------------------------------------------------------------------ boot
 async function loadProjects(selectId) {
   S.projects = await api("/api/projects");
@@ -109,7 +164,21 @@ async function loadProjects(selectId) {
 async function refreshLibKeys() { const papers = await api(`/api/projects/${S.project.id}/papers`); LIBKEYS = new Set(papers.map((p) => p.key)); return papers; }
 function llmReady() { const s = S.settings; return s && s.llm_model && (s.llm_model_src === "2" ? (s.llm2_api_key || /localhost|127\.0\.0\.1/.test(s.llm2_base_url || "")) : (s.llm_api_key || /localhost|127\.0\.0\.1/.test(s.llm_base_url || ""))); }
 const fmtTok = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n || 0);
+let SYNC_SEEN = null;
+async function refreshSync() {
+  if (!S.settings?.sync_path) return;
+  try {
+    const st = await api("/api/sync"); const el = $("#syncMeter");
+    if (el) el.innerHTML = `<a href="#settings" style="color:${st.last_error ? "#ffb4a8" : "#9fc3ff"};text-decoration:none">⇄ Shared library${st.last_error ? ": needs attention" : st.last_sync ? ` · synced ${ago(st.last_sync)}` : ""}</a>`;
+    if (SYNC_SEEN !== null && st.imported > SYNC_SEEN) {
+      toast(`Library updated from ${st.imported_from || "the other computer"}`, "ok");
+      if (/^#?(home|library|docs)?$/.test(location.hash.replace(/^#/, "")) || location.hash === "") route();  // refresh lists, never an open editor
+    }
+    SYNC_SEEN = st.imported;
+  } catch { }
+}
 async function refreshMeter() {
+  refreshSync();
   try {
     const u = (await api("/api/usage?days=1")).total;
     const el = $("#usageMeter"); if (!el) return;
@@ -165,7 +234,7 @@ function applyTheme(t) {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if ((localStorage.getItem("rt_theme") || "navy") === "auto") applyTheme("auto"); });
 function renderLLMStatus() {
   const s = S.settings;
-  $("#llmStatus").innerHTML = (llmReady() ? `<span class="dot ok"></span>${esc(s.llm_model)}${s.llm_fast_model ? `<div class="small" style="opacity:.75;margin-left:14px">fast: ${esc(s.llm_fast_model)}</div>` : ""}${s.llm_review_model ? `<div class="small" style="opacity:.75;margin-left:14px">review: ${esc(s.llm_review_model)}</div>` : ""}` : `<span class="dot"></span>AI not configured — <a href="#settings" style="color:#9fc3ff">Settings</a>`) + `<div id="usageMeter" style="margin-top:6px"></div><div id="updBadge"></div>`;
+  $("#llmStatus").innerHTML = (claudeMode() ? `<span class="dot ok"></span>AI: Claude app<div class="small" style="opacity:.75;margin-left:14px">your Claude plan</div>` : llmReady() ? `<span class="dot ok"></span>${esc(s.llm_model)}${s.llm_fast_model ? `<div class="small" style="opacity:.75;margin-left:14px">fast: ${esc(s.llm_fast_model)}</div>` : ""}${s.llm_review_model ? `<div class="small" style="opacity:.75;margin-left:14px">review: ${esc(s.llm_review_model)}</div>` : ""}` : `<span class="dot"></span>AI not configured — <a href="#settings" style="color:#9fc3ff">Settings</a>`) + `<div id="usageMeter" style="margin-top:6px"></div><div id="syncMeter" class="small" style="margin-top:4px"></div><div id="updBadge"></div>`;
   showUpdateBadge();
   refreshMeter();
 }
@@ -176,7 +245,9 @@ async function boot() {
   await loadProjects(); renderLLMStatus();
   $("#projectSelect").onchange = async (e) => { await loadProjects(e.target.value); route(); };
   $("#newProjectBtn").onclick = newProjectDialog;
-  window.addEventListener("hashchange", route); route();
+  window.addEventListener("hashchange", () => { document.body.classList.remove("nav-open"); route(); }); route();
+  $("#menuBtn").onclick = () => document.body.classList.toggle("nav-open");
+  $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("a")) document.body.classList.remove("nav-open"); });
   setInterval(refreshMeter, 20000);
   checkUpdates(false);
   // never lose typing: warn before leaving while a save is still pending (drafts are also kept in localStorage)
@@ -216,7 +287,7 @@ function dedication() {
     <button class="btn" onclick="closeModal()">Close</button></div>`);
 }
 document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
-const needLLM = () => llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;
+const needLLM = () => claudeMode() ? `<div class="notice info">AI work runs in the <b>Claude app</b> on your Claude plan: AI buttons here hand the job to Claude, which saves the result back into A.F.R.A. <a href="#settings">Settings</a></div>` : llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;
 
 // ================================================================== HOME
 VIEWS.home = async () => {
@@ -660,7 +731,7 @@ VIEWS.library = async () => {
   $("#lsync").onclick = () => syncDialog(load);
   $("#lcheck").onclick = (e) => busy(e.currentTarget, () => refCheck($("#lpanel"), ""));
   $("#impId").onclick = () => {
-    const box = modal(`<h2>Import by DOI or arXiv ID</h2><p class="muted">One per line, e.g. <code>10.1038/nature14539</code>, <code>https://doi.org/…</code>, <code>2303.08774</code>, or arXiv URLs.</p>
+    const box = modal(`<h2>Import by DOI, arXiv ID or ISBN</h2><p class="muted">One per line, e.g. <code>10.1038/nature14539</code>, <code>https://doi.org/…</code>, <code>2303.08774</code>, arXiv URLs, or a book's ISBN like <code>978-602-…</code> (on the back cover, above the barcode).</p>
       <textarea id="ids" rows="8" class="mono"></textarea><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="go">Import</button></div>`);
     $("#go", box).onclick = (e) => busy(e.currentTarget, async () => {
       const r = await api(`/api/projects/${S.project.id}/papers/identifier`, { body: { text: $("#ids").value } });
@@ -836,8 +907,10 @@ function exportDialog({ markdown, meta = {}, template, style, filenameHint }) {
       <div><label class="f">Student ID (NIM) <small>thesis</small></label><input type="text" id="x_nim" value="${esc(meta.student_id || "")}"></div>
       <div><label class="f">Department / Program studi</label><input type="text" id="x_dept" value="${esc(meta.department || "")}"></div>
       <div><label class="f">City</label><input type="text" id="x_city" value="${esc(meta.city || "")}"></div>
-      <div><label class="f">Course <small>APA student paper</small></label><input type="text" id="x_course" value="${esc(meta.course || "")}"></div>
-      <div><label class="f">Instructor <small>APA student paper</small></label><input type="text" id="x_instr" value="${esc(meta.instructor || "")}"></div>
+      <div><label class="f">Course / mata kuliah</label><input type="text" id="x_course" value="${esc(meta.course || localStorage.getItem("rt_course") || "")}"></div>
+      <div><label class="f">Instructor / dosen pengampu</label><input type="text" id="x_instr" value="${esc(meta.instructor || localStorage.getItem("rt_instr") || "")}"></div>
+      <div><label class="f">Document type <small>tugas cover</small></label><input type="text" id="x_dtype" list="x_dtypes" value="${esc(meta.doc_type || "")}" placeholder="MAKALAH"><datalist id="x_dtypes"><option>MAKALAH</option><option>LAPORAN PRAKTIKUM</option><option>PROPOSAL PENELITIAN</option><option>RESUME JURNAL</option><option>TUGAS</option><option>ESAI</option></datalist></div>
+      <div><label class="f">University logo <small>tugas cover</small></label><div class="row" id="x_logo"></div></div>
     </div>
     <div class="grid g3" style="gap:0 14px">
       <div><label class="f">Labels language</label><select id="x_lang"><option value="en">English</option><option value="id" ${meta.lang === "id" || S.settings.default_language === "Indonesian" ? "selected" : ""}>Bahasa Indonesia</option></select></div>
@@ -847,18 +920,27 @@ function exportDialog({ markdown, meta = {}, template, style, filenameHint }) {
       <div><label class="f">Font size</label><input type="number" id="x_size" placeholder="default"></div>
       <div><label class="f">Line spacing</label><input type="number" id="x_spacing" step="0.05" placeholder="default"></div>
     </div>
-    <div class="checks" style="margin-top:12px"><label><input type="checkbox" id="x_toc" checked>Table of contents (thesis/report)</label><label><input type="checkbox" id="x_uncited">Include uncited library sources in references</label></div>
+    <div class="small muted" style="margin-top:4px">Several students on one cover: put each as “Name (NIM)” in Author(s), separated by “;”.</div>
+    <div class="checks" style="margin-top:12px"><label><input type="checkbox" id="x_toc" checked>Table of contents (thesis/report/tugas)</label><label><input type="checkbox" id="x_uncited">Include uncited library sources in references</label></div>
     <div id="x_msg"></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="x_go">Download .docx</button></div>`, true);
+  const drawLogo = async () => {
+    const has = await fetch("/api/cover-logo").then((r) => r.ok).catch(() => false);
+    $("#x_logo", box).innerHTML = `${has ? `<img src="/api/cover-logo?t=${Date.now()}" style="height:34px;border-radius:4px">` : ""}<label class="btn small">${has ? "Change" : "Add logo"}<input type="file" id="x_logof" accept="image/png,image/jpeg" hidden></label>${has ? `<button class="btn small ghost" id="x_logod">Remove</button>` : ""}`;
+    $("#x_logof", box).onchange = async (ev) => { const fd = new FormData(); fd.append("file", ev.target.files[0]); try { await api("/api/cover-logo", { body: fd }); drawLogo(); } catch (err) { toast(err.message, "bad"); } };
+    const d = $("#x_logod", box); if (d) d.onclick = async () => { await api("/api/cover-logo", { method: "DELETE" }); drawLogo(); };
+  };
+  drawLogo();
   $("#x_go", box).onclick = (e) => busy(e.currentTarget, async () => {
     const v = (id) => $("#" + id).value.trim();
     localStorage.setItem("rt_author", v("x_authors")); localStorage.setItem("rt_aff", v("x_aff"));
+    localStorage.setItem("rt_course", v("x_course")); localStorage.setItem("rt_instr", v("x_instr"));
     const options = { lang: v("x_lang"), toc: $("#x_toc").checked, include_uncited: $("#x_uncited").checked };
     if (v("x_page")) options.page = v("x_page"); if ($("#x_num").value !== "__") options.numbering = $("#x_num").value || null;
     if (v("x_font")) options.font = v("x_font"); if (v("x_size")) options.size = +v("x_size"); if (v("x_spacing")) options.spacing = +v("x_spacing");
     const body = { project_id: S.project.id, markdown, template: v("x_tpl"), style: v("x_style"), options,
       meta: { title: v("x_title"), authors: v("x_authors"), affiliation: v("x_aff"), date: v("x_date"), keywords: v("x_kw"), abstract: v("x_abs"),
-        degree: v("x_degree"), student_id: v("x_nim"), department: v("x_dept"), city: v("x_city"), course: v("x_course"), instructor: v("x_instr") } };
+        degree: v("x_degree"), student_id: v("x_nim"), department: v("x_dept"), city: v("x_city"), course: v("x_course"), instructor: v("x_instr"), doc_type: v("x_dtype") } };
     const r = await fetch("/api/export/docx", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const missing = decodeURIComponent(r.headers.get("X-Missing") || "");
@@ -951,7 +1033,16 @@ VIEWS.docs = async () => {
     <div class="row"><label class="btn">Import .md / .txt<input type="file" id="dimp" accept=".md,.txt,.markdown" hidden></label><button class="btn primary" id="dnew">New document</button></div></div>
     <div class="card">${docs.length ? docs.map((d) => `<div class="list-item" data-id="${d.id}"><div class="t">${esc(d.title)}</div><div class="small muted">Updated ${fmtDate(d.updated)} · ${esc((d.preview || "").replace(/[#*\n]+/g, " ").slice(0, 160))}</div></div>`).join("") : `<div class="empty">No documents yet.</div>`}</div>`;
   $$(".list-item[data-id]").forEach((el) => el.onclick = () => location.hash = "#docs/" + el.dataset.id);
-  $("#dnew").onclick = async () => { const d = await api(`/api/projects/${S.project.id}/documents`, { body: { title: "Untitled document", content: "# Untitled document\n\n## Introduction\n\n" } }); location.hash = "#docs/" + d.id; };
+  $("#dnew").onclick = () => {
+    const box = modal(`<h2>New document</h2><p class="small muted" style="margin-top:0">Start blank, or from a coursework outline. Outlines export as an Indonesian campus assignment: cover with logo, Kata Pengantar, Daftar Isi, BAB I…, Daftar Pustaka.</p>
+      <div class="grid g2" style="gap:10px">${[["", "Blank document", "Start from an empty page"], ...Object.entries(S.meta.starters || {}).map(([k, v]) => [k, v, "Outline + Word format for tugas kuliah"])]
+        .map(([k, n, d]) => `<button class="card" data-st="${k}" style="text-align:left;cursor:pointer;margin:0"><b>${esc(n)}</b><div class="small muted">${esc(d)}</div></button>`).join("")}</div>`);
+    $$("[data-st]", box).forEach((b) => b.onclick = async () => {
+      const st = b.dataset.st;
+      const d = await api(`/api/projects/${S.project.id}/documents`, { body: st ? { starter: st } : { title: "Untitled document", content: "# Untitled document\n\n## Introduction\n\n" } });
+      closeModal(); location.hash = "#docs/" + d.id;
+    });
+  };
   $("#dimp").onchange = async (e) => { const f = e.target.files[0]; const d = await api(`/api/projects/${S.project.id}/documents`, { body: { title: f.name.replace(/\.\w+$/, ""), content: await f.text() } }); location.hash = "#docs/" + d.id; };
 };
 async function docEditor(id) {
@@ -978,12 +1069,29 @@ async function docEditor(id) {
     ta.value = draft.v.content; $("#dtitle").value = draft.v.title; toast("Recovered unsaved changes from this browser", "ok");
   }
   const preview = () => { $("#dprev").innerHTML = md(ta.value); $("#dwc").textContent = `${wordCount(ta.value).toLocaleString()} words`; };
-  const saver = autosaver("doc_" + id, () => api(`/api/documents/${id}`, { method: "PUT", body: { title: $("#dtitle").value, content: ta.value } }), () => $("#dsaved"));
+  let base = doc.updated, force = false;  // the version this editor started from (shared library / Claude can change it too)
+  const conflict = (cur) => {
+    if ($("#dconf")) return;
+    $("#dpanel").insertAdjacentHTML("afterbegin", `<div class="notice bad" id="dconf"><b>This document was changed somewhere else</b> (on the other computer of your shared library, or by Claude) while you were editing. Your text is safe here.
+      <div class="row" style="margin-top:8px"><button class="btn small primary" id="dkeep">Keep my version</button><button class="btn small" id="dtheirs">Use the new version</button><button class="btn small" id="dboth">Keep both (save mine as a copy)</button></div></div>`);
+    $("#dkeep").onclick = () => { force = true; $("#dconf").remove(); changed(); };
+    $("#dtheirs").onclick = () => { Draft.drop("doc_" + id); docEditor(id); };
+    $("#dboth").onclick = async () => {
+      const mine = await api(`/api/projects/${S.project.id}/documents`, { body: { title: `${$("#dtitle").value} (my copy)`, content: ta.value } });
+      Draft.drop("doc_" + id); toast("Your version was saved as a separate document", "ok"); location.hash = "#docs/" + mine.id;
+    };
+  };
+  const saver = autosaver("doc_" + id, async () => {
+    const r = await fetch(`/api/documents/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: $("#dtitle").value, content: ta.value, base, force }) });
+    if (r.status === 409) { conflict((await r.json()).current); throw new Error("changed elsewhere"); }
+    if (!r.ok) throw new Error(r.statusText);
+    base = (await r.json()).updated; force = false;
+  }, () => $("#dsaved"));
   const changed = () => saver({ title: $("#dtitle").value, content: ta.value });
   if (draft && ta.value !== doc.content) changed();
   ta.oninput = () => { preview(); changed(); }; $("#dtitle").oninput = changed; preview();
   $("#dlayout").onchange = (e) => { const v = e.target.value; $("#dwrap").className = "editor-wrap" + (v === "split" ? "" : " single"); ta.style.display = v === "preview" ? "none" : ""; $("#dprev").style.display = v === "edit" ? "none" : ""; };
-  $("#dexp").onclick = () => exportDialog({ markdown: ta.value, meta: { title: "" }, filenameHint: $("#dtitle").value });
+  $("#dexp").onclick = () => exportDialog({ markdown: ta.value, meta: { title: "", doc_type: doc.meta?.doc_type, lang: doc.meta?.lang }, template: doc.meta?.template, filenameHint: $("#dtitle").value });
   $("#dcite").onclick = () => citePicker((c) => insertAtCursor(ta, c));
   $("#dmd").onclick = () => download(new Blob([ta.value], { type: "text/markdown" }), ($("#dtitle").value || "document") + ".md");
   $("#ddel").onclick = async () => { if (!confirm("Delete this document?")) return; await api(`/api/documents/${id}`, { method: "DELETE" }); location.hash = "#docs"; };
@@ -1390,8 +1498,15 @@ const PRESETS = {
   lmstudio: { provider: "openai", base: "http://localhost:1234/v1", model: "local-model", fast: "", note: "Local: start the LM Studio server. No key needed." },
 };
 VIEWS.settings = async () => {
+  if (location.port === "8770") {  // opened from a phone: settings stay on the computer
+    main().innerHTML = `<div class="page-head"><div><h1>Settings</h1></div></div><div class="card">For safety, settings, API keys, updates and sharing can only be changed on the computer where A.F.R.A is installed. Everything else works here.</div>`;
+    return;
+  }
   const s = S.settings = await api("/api/settings");
   main().innerHTML = `<div class="page-head"><div><h1>Settings</h1><p>Stored locally in <code>data/settings.json</code>. Nothing leaves your computer except calls to the AI and search providers you choose.</p></div></div>
+  <div class="card" style="margin-bottom:16px"><h3>How A.F.R.A uses AI</h3><div id="claudeBox" class="small muted">Checking…</div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Use on your phone</h3><div id="phoneBox" class="small muted">Checking…</div></div>
   <div class="grid g2">
     <div class="card"><h3>AI connection 1</h3>
       <label class="f">Quick preset</label><select id="preset"><option value="">— choose a provider —</option>${Object.keys(PRESETS).map((k) => `<option value="${k}">${k}</option>`).join("")}</select>
@@ -1435,12 +1550,14 @@ VIEWS.settings = async () => {
       <div class="card"><h3>Journal quartiles (SJR)</h3>
         <p class="small muted" style="margin-top:0">${S.meta.sjr_journals ? `<b style="color:var(--ok)">✓ ${S.meta.sjr_journals.toLocaleString()} journals loaded.</b> ` : ""}For official Q1–Q4 quartiles: open <a href="https://www.scimagojr.com/journalrank.php" target="_blank">scimagojr.com/journalrank.php</a>, click <b>Download data</b> (top right), then choose that file here. Do this once a year. Without it, quartiles are estimated from OpenAlex.</p>
         <label class="btn">Import SCImago file (.csv)<input type="file" id="sjrf" accept=".csv,.txt" hidden></label></div>
-      <div class="card"><h3>Use with your Claude plan</h3><div id="claudeBox" class="small muted">Checking…</div></div>
       <div class="card"><h3>Updates</h3><div id="upd" class="small muted">Checking…</div>
         <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="autoupd" ${S.settings.auto_update === false ? "" : "checked"}> Install updates automatically while I'm not working</label></div>
       <div class="card"><h3>Your data & backups</h3><div id="bk" class="small muted">Loading…</div></div>
       <div class="card"><h3>Project</h3><label class="f">Name</label><input type="text" id="pname" value="${esc(S.project.name)}">
-        <div class="row" style="margin-top:10px"><button class="btn" id="prename">Rename</button><button class="btn danger" id="pdel">Delete project…</button></div></div>
+        <div class="row" style="margin-top:10px"><button class="btn" id="prename">Rename</button><button class="btn danger" id="pdel">Delete project…</button></div>
+        <h3 style="margin-top:18px">Share a project as a file</h3>
+        <p class="small muted" style="margin-top:0">For group work: one <code>.afra</code> file with this project's papers, notes, quotes, folders, PDFs and documents. Send it by WhatsApp or email; importing adds it as a new project and never overwrites anything.</p>
+        <div class="row"><a class="btn" href="/api/projects/${S.project.id}/bundle">⬇ Save “${esc(S.project.name)}” as a file</a><label class="btn">⬆ Import a project file<input type="file" id="pimp" accept=".afra,.zip" hidden></label></div></div>
     </div>
   </div>`;
   const ROLE_KEYS = { main: ["llm_model", "llm_model_src"], fast: ["llm_fast_model", "llm_fast_src"], review: ["llm_review_model", "llm_review_src"] };
@@ -1481,7 +1598,8 @@ VIEWS.settings = async () => {
     const q = refresh ? "&refresh=1" : "";
     const [a, b] = await Promise.all([api(`/api/models?src=1${q}`), $("#s_llm2_base_url").value && $("#s_llm2_api_key").value ? api(`/api/models?src=2${q}`) : { models: [] }]);
     cats = { 1: a.models, 2: b.models };
-    if (a.error) toast("Connection 1 model list: " + a.error, "bad"); if (b.error) toast("Connection 2 model list: " + b.error, "bad");
+    const quiet = !refresh && claudeMode();  // no key needed in Claude mode: don't greet the user with key errors
+    if (a.error && !quiet) toast("Connection 1 model list: " + a.error, "bad"); if (b.error && !quiet) toast("Connection 2 model list: " + b.error, "bad");
     try { rec = await api("/api/models/recommend"); } catch { rec = null; }
     drawRoles();
   };
@@ -1561,15 +1679,81 @@ VIEWS.settings = async () => {
   const drawClaude = (c) => {
     const box = $("#claudeBox"); if (!box) return;
     const how = `In Claude, click <b>+</b> → <b>A.F.R.A</b> and pick a workflow (Coursework / Tugas, Literature review, Find evidence, Write a paper, Review my draft), or just ask Claude to find papers, write into your documents and export to Word.`;
-    box.innerHTML = c.connected
+    const mode = `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;color:var(--ink)">
+        <label style="display:flex;gap:8px;align-items:flex-start"><input type="radio" name="aimode" value="claude" ${claudeMode() ? "checked" : ""}><span><b>Claude app</b> (recommended): AI work runs on your Claude Pro/Max plan. No API key, no extra cost.</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start"><input type="radio" name="aimode" value="api" ${claudeMode() ? "" : "checked"}><span><b>My own API key</b>: A.F.R.A's AI buttons call the model directly (set it up in AI connection below, billed per use).</span></label></div>`;
+    box.innerHTML = mode + (c.connected
       ? `<div style="color:var(--ok)">✓ Connected to the Claude app.</div><p>${how}</p><p>If A.F.R.A doesn't show up in Claude yet, quit Claude completely and open it again.</p>`
       : `<p style="margin-top:0">Let Claude do the AI work on your <b>Claude Pro/Max plan</b>, with no API key: Claude finds real papers through A.F.R.A, writes into your documents and exports Word files.</p>
          ${c.claude_installed ? "" : `<p>First install the <a href="https://claude.ai/download" target="_blank">Claude desktop app</a> and sign in.</p>`}
-         <button class="btn primary" id="claudego">Connect to Claude</button><p>Then quit Claude and open it again. ${how}</p>`;
+         <button class="btn primary" id="claudego">Connect to Claude</button><p>Then quit Claude and open it again. ${how}</p>`);
+    $$("[name=aimode]").forEach((r) => r.onchange = async () => {
+      S.settings = await api("/api/settings", { method: "PUT", body: { ai_mode: r.value } }); renderLLMStatus(); drawClaude(c);
+      toast(r.value === "claude" ? "AI work now runs in the Claude app" : "AI buttons now use your API key", "ok");
+    });
     const g = $("#claudego");
     if (g) g.onclick = () => busy(g, async () => { try { drawClaude(await api("/api/claude/connect", { method: "POST" })); toast("Connected. Quit and reopen Claude.", "ok"); } catch (err) { toast(err.message, "bad"); } });
   };
   api("/api/claude").then(drawClaude).catch(() => { });
+  const PROV = { gdrive: "Google Drive", icloud: "iCloud Drive" };
+  const invite = (prov, name) => prov === "icloud"
+    ? `<ol style="margin:6px 0;padding-left:18px"><li>On a Mac: Finder → iCloud Drive → right-click <b>${esc(name)}</b> → <b>Share</b> → <b>Collaborate</b>, choose “Can make changes”, and invite their Apple ID.</li><li>They accept the invitation; the folder appears in their iCloud Drive (Windows: install iCloud for Windows).</li><li>In their A.F.R.A: Settings → Shared library → iCloud Drive → <b>Join “${esc(name)}”</b>.</li></ol>`
+    : `<ol style="margin:6px 0;padding-left:18px"><li>Open <a href="https://drive.google.com" target="_blank">drive.google.com</a>, right-click <b>${esc(name)}</b> → <b>Share</b>, enter their Google account and choose <b>Editor</b>.</li><li>On their side: Google Drive → <b>Shared with me</b> → right-click the folder → <b>Organise → Add shortcut → My Drive</b>. They need <a href="https://www.google.com/drive/download/" target="_blank">Google Drive for desktop</a> installed and signed in.</li><li>In their A.F.R.A: Settings → Shared library → Google Drive → <b>Join “${esc(name)}”</b>.</li></ol>`;
+  const drawSync = async () => {
+    const box = $("#syncBox"); if (!box) return;
+    let st; try { st = await api("/api/sync"); } catch (e) { box.textContent = e.message; return; }
+    if (st.enabled) {
+      const name = st.path.split(/[\\/]/).pop();
+      box.innerHTML = `<div style="color:${st.last_error ? "var(--bad)" : "var(--ok)"};margin-bottom:6px">${st.last_error ? "⚠ " + esc(st.last_error) : `✓ Your library is shared through ${PROV[st.provider] || "a shared folder"}.`}</div>
+        <div>Folder: <code style="word-break:break-all">${esc(st.path)}</code></div>
+        <div style="margin-top:4px">This computer: <b>${esc(st.device.name)}</b>. ${st.others.length ? "Also sharing: " + st.others.map((o) => `<b>${esc(o.name)}</b> (active ${ago(o.seen)})`).join(", ") + "." : "Nobody else has joined yet: invite them below."}</div>
+        <div style="margin-top:4px">Last synced ${st.last_sync ? ago(st.last_sync) : "not yet"}${st.pending ? ` · ${st.pending} changes waiting to upload` : ""}.</div>
+        <details style="margin-top:8px"><summary>Invite someone</summary>${invite(st.provider, name)}</details>
+        <div class="row" style="margin-top:10px"><button class="btn small" id="snow">Sync now</button><button class="btn small danger" id="soff">Stop sharing on this computer</button></div>`;
+      $("#snow").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/sync/now", { method: "POST" }); drawSync(); });
+      $("#soff").onclick = (e) => { if (confirm("Stop sharing on this computer? Your library stays here; it just stops syncing. The shared folder is not deleted.")) busy(e.currentTarget, async () => { await api("/api/sync/disable", { method: "POST" }); drawSync(); }); };
+      return;
+    }
+    box.innerHTML = `<p style="margin-top:0">Share your <b>whole library</b> (projects, papers, PDFs, notes, quotes and documents) with someone else, on Mac or Windows. Changes show up on the other computer within a minute. Settings and API keys stay private. If you both edit the same document at once, both versions are kept.</p>
+      <div class="row"><label class="small">Share through</label><select id="sprov" style="width:200px"><option value="gdrive">Google Drive</option><option value="icloud">iCloud Drive</option></select></div>
+      <div id="sfold" style="margin-top:10px"></div>`;
+    const load = async () => {
+      const prov = $("#sprov").value, el = $("#sfold");
+      if (!(st.roots[prov] || []).length) {
+        el.innerHTML = prov === "gdrive" ? `Install <a href="https://www.google.com/drive/download/" target="_blank">Google Drive for desktop</a> and sign in, then come back here.` : `Turn on iCloud Drive (Mac: System Settings → your name → iCloud; Windows: the iCloud app), then come back here.`;
+        return;
+      }
+      let list = []; try { list = await api(`/api/sync/folders?provider=${prov}`); } catch (e) { el.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; return; }
+      const shared = list.filter((f) => f.afra);
+      el.innerHTML = `${shared.length ? `<div style="margin-bottom:8px"><b>Join a shared library</b> someone already set up:</div>${shared.map((f, i) => `<button class="btn primary small" data-join="${i}" style="margin:0 6px 6px 0">Join “${esc(f.name)}”</button>`).join("")}<div style="margin:10px 0 6px"><b>Or start a new one:</b></div>` : `<div style="margin-bottom:6px"><b>Start a shared library</b> (to join one someone shared with you, first add it to your ${PROV[prov]}; it then shows up here):</div>`}
+        <div class="row"><input type="text" id="sname" value="AFRA Shared Library" style="width:260px"><button class="btn ${shared.length ? "" : "primary"}" id="sgo">Start sharing</button></div>`;
+      const go = (btn, body) => busy(btn, async () => { await api("/api/sync/enable", { body: { provider: prov, ...body } }); toast("Shared library is on", "ok"); drawSync(); });
+      $$("[data-join]").forEach((b) => b.onclick = () => go(b, { path: shared[+b.dataset.join].path }));
+      $("#sgo").onclick = (e) => go(e.currentTarget, { name: $("#sname").value });
+    };
+    $("#sprov").onchange = load; load();
+  };
+  drawSync();
+  const drawPhone = (ph) => {
+    const box = $("#phoneBox"); if (!box) return;
+    box.innerHTML = ph.enabled ? `<div style="color:var(--ok);margin-bottom:6px">✓ Phone access is on.</div>
+        <ol style="margin:4px 0;padding-left:18px"><li>Connect your phone or tablet to the <b>same Wi-Fi</b> as this computer.</li>
+        <li>Open <b>${ph.urls.map((u) => `<code>${esc(u)}</code>`).join(" or ") || "(no network found: is this computer on Wi-Fi?)"}</b> in its browser.</li>
+        <li>Enter the PIN <b style="font-size:18px;letter-spacing:3px;color:var(--ink)">${esc(ph.pin)}</b>. Tip: “Add to Home Screen” makes it feel like an app.</li></ol>
+        <div>It works while this computer is on and awake. If your computer asks whether to allow incoming connections for Python, click <b>Allow</b>. API keys, settings and updates can't be changed from the phone.</div>
+        <div class="row" style="margin-top:10px"><button class="btn small" id="phpin">New PIN (signs out phones)</button><button class="btn small danger" id="phoff">Turn off</button></div>`
+      : `<p style="margin-top:0">Read your library, PDFs and documents, add papers and edit drafts from your phone or tablet, over your home Wi-Fi. Protected by a 6-digit PIN; nothing is put on the internet.</p><button class="btn primary" id="phon">Turn on phone access</button>`;
+    const set = (btn, body) => busy(btn, async () => drawPhone(await api("/api/phone", { body })));
+    const on = $("#phon"); if (on) on.onclick = () => set(on, { enabled: true });
+    const off = $("#phoff"); if (off) off.onclick = () => set(off, { enabled: false });
+    const np = $("#phpin"); if (np) np.onclick = () => set(np, { enabled: true, new_pin: true });
+  };
+  api("/api/phone").then(drawPhone).catch(() => { });
+  $("#pimp").onchange = async (e) => {
+    const fd = new FormData(); fd.append("file", e.target.files[0]); toast("Importing project…");
+    try { const r = await api("/api/projects/import", { body: fd }); await loadProjects(r.id); toast(`Imported “${r.name}”: ${r.papers} papers, ${r.documents} documents`, "ok"); location.hash = "#library"; }
+    catch (err) { toast(err.message, "bad"); }
+  };
   $("#prename").onclick = async () => { await api(`/api/projects/${S.project.id}`, { method: "PUT", body: { name: $("#pname").value } }); await loadProjects(S.project.id); toast("Renamed", "ok"); };
   $("#pdel").onclick = async () => {
     if (S.projects.length < 2) return toast("Can't delete the only project", "bad");

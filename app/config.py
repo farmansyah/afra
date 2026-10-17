@@ -39,6 +39,12 @@ DEFAULTS = {
     "default_template": "apa7",
     "ui_theme": "navy",
     "auto_update": True,               # installed copies update themselves while idle (never the git dev copy)
+    "ai_mode": "claude",               # claude = AI work happens in the Claude app (Pro/Max plan) | api = own API key
+    "sync_provider": "",               # shared library: gdrive | icloud | "" (off)
+    "sync_path": "",                   # the shared folder
+    "phone_access": False,             # second, PIN-protected door on the home Wi-Fi (port 8770)
+    "phone_pin": "",
+    "phone_secret": "",
     "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
     "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }
@@ -65,6 +71,9 @@ def get_settings() -> dict:
     if saved and saved.get("sources_version", 1) < 2:  # saved before Europe PMC existed: switch it on once
         s["default_sources"] = list(dict.fromkeys(list(s.get("default_sources") or []) + ["europepmc"]))
         s["sources_version"] = 2
+    if "ai_mode" not in saved and (saved.get("llm_api_key") or saved.get("llm2_api_key")
+                                   or any(h in saved.get("llm_base_url", "") for h in ("localhost", "127.0.0.1"))):  # set up before Claude mode existed
+        s["ai_mode"] = "api"
     if not saved.get("ui_logo_chosen"):  # never picked: follow the current default logo
         s["ui_logo"] = DEFAULTS["ui_logo"]
     for key, env in ENV_MAP.items():

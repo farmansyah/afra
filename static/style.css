@@ -254,3 +254,13 @@ table.lib tr:hover td { background: var(--panel-2); cursor: pointer; }
 .dedi h2 { font-size: 24px; margin: 16px 0 10px; }
 .dedi p { font-family: var(--serif); font-size: 17px; line-height: 1.7; color: var(--ink-2); margin: 0 0 14px; }
 .dedi .sig { font-family: var(--serif); font-style: italic; color: var(--muted); margin-bottom: 18px; }
+
+/* phones: a menu button opens the sidebar over the page */
+#menuBtn { display: none; }
+@media (max-width: 760px) {
+  #menuBtn { display: grid; place-items: center; position: fixed; top: 10px; left: 10px; z-index: 60; width: 42px; height: 42px; border-radius: 11px; border: 0; background: var(--side); color: var(--side-ink); font-size: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.28); cursor: pointer; }
+  #main { padding-top: 64px; }
+  body.nav-open #sidebar { display: flex; position: fixed; top: 0; bottom: 0; left: 0; z-index: 55; overflow-y: auto; box-shadow: 0 0 0 100vmax rgba(0,0,0,.4); }
+  .page-head { flex-wrap: wrap; gap: 10px; }
+  .modal-box, .modal-box.wide { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+}
