@@ -326,6 +326,7 @@ async function boot() {
   $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("a")) document.body.classList.remove("nav-open"); });
   setInterval(refreshMeter, 20000);
   pollClaude(); setInterval(pollClaude, 4000);
+  pollMessages(); setInterval(pollMessages, 5000);
   checkUpdates(false);
   // never lose typing: warn before leaving while a save is still pending (drafts are also kept in localStorage)
   window.addEventListener("beforeunload", (e) => { if (S.pending > 0) { e.preventDefault(); e.returnValue = ""; } });
@@ -357,6 +358,7 @@ function addFooter() {
   main().insertAdjacentHTML("beforeend", `<footer id="appFooter" class="app-footer">
     <div><img class="brand-logo" src="${logoUrl()}" alt=""><b>A.F.R.A</b> · Article Finder &amp; Research Assistant</div>
     <div>© ${YEARS} <b>danafarmansyah</b>. All rights reserved. · Crafted with <button class="heart dedi-heart" type="button" title="♥" aria-label="A little note">♥</button></div></footer>`);
+  markHeart();
 }
 // small notes, tucked behind the heart. What shows is set in static/notes.json on GitHub (see its "_how_to").
 const NOTE_FALLBACK = { title: "For Raina Afra", signature: "— Dana", per_open: 1, order: "shuffle", more_button: false,
@@ -395,15 +397,76 @@ function pickNotes(cfg) {
   return pin ? [pin, ...chosen] : chosen;
 }
 let NOTES_CFG = null;
+const heartTabs = (on, unread) => `<div class="dedi-tabs"><button data-ht="note" class="${on === "note" ? "on" : ""}">♥ Note</button><button data-ht="msg" class="${on === "msg" ? "on" : ""}">Messages${unread ? ` <span class="dedi-badge">${unread}</span>` : ""}</button></div>`;
+function bindHeartTabs(box) { $$("[data-ht]", box).forEach((b) => b.onclick = () => b.dataset.ht === "msg" ? openMessages() : dedication()); }
 async function dedication() {
   if (!NOTES_CFG) { try { NOTES_CFG = await api("/api/notes"); } catch { NOTES_CFG = NOTE_FALLBACK; } }
   const cfg = NOTES_CFG, picked = pickNotes(cfg);
   const title = (picked.length === 1 && picked[0].title) || cfg.title || NOTE_FALLBACK.title;
   const pool = (cfg.notes || []).filter((n) => n.on !== false).length;
-  const box = modal(`<div class="dedi"><img src="${logoUrl()}" alt=""><h2>${esc(title)}</h2>${picked.map((n) => `<p>${esc(n.text)}</p>`).join("")}<div class="sig">${esc(cfg.signature ?? NOTE_FALLBACK.signature)}</div>
-    <div class="row" style="justify-content:center">${cfg.more_button !== false && pool > picked.length ? `<button class="btn" id="dmore">Another note ♥</button>` : ""}<button class="btn" onclick="closeModal()">Close</button></div></div>`);
+  const box = modal(`${heartTabs("note", MSG_UNREAD)}<div class="dedi"><img src="${logoUrl()}" alt=""><h2>${esc(title)}</h2>${picked.map((n) => `<p>${esc(n.text)}</p>`).join("")}<div class="sig">${esc(cfg.signature ?? NOTE_FALLBACK.signature)}</div>
+    <div class="row" style="justify-content:center">${cfg.more_button !== false && pool > picked.length ? `<button class="btn" id="dmore">Another note ♥</button>` : ""}<button class="btn" id="dwrite">Write back ✉</button><button class="btn" onclick="closeModal()">Close</button></div></div>`);
+  bindHeartTabs(box);
   const more = $("#dmore", box); if (more) more.onclick = () => dedication();
+  $("#dwrite", box).onclick = () => openMessages();
   setTimeout(() => { NOTES_CFG = null; }, 10 * 60 * 1000);  // next click after 10 minutes reads the newest notes
+}
+// ---- messages between the two of you: they travel with the shared library (Google Drive / iCloud), privately
+let MSG_UNREAD = 0, MSG_OPEN = false, MSG_SEEN = null;
+const msgTime = (t) => { const d = new Date(t * 1000), now = new Date(); return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); };
+async function openMessages() {
+  const r = await api("/api/messages");
+  if (r.unread) { await api("/api/messages/read", { method: "POST" }); }
+  MSG_UNREAD = 0; markHeart(); MSG_OPEN = true;
+  const box = modal(`${heartTabs("msg", 0)}<div class="chat">
+    ${r.shared ? "" : `<div class="notice small" style="margin:0 0 10px">Messages reach the other person through your <b>Shared library</b>. Turn it on in <a href="#settings" onclick="closeModal()">Settings</a> on both computers; until then they stay here.</div>`}
+    <div class="chat-log" id="chatLog"></div>
+    <div class="chat-send"><textarea id="chatText" rows="2" placeholder="Write something sweet… (Enter to send, Shift+Enter for a new line)"></textarea><button class="btn primary" id="chatGo">Send</button></div>
+    <div class="small muted" style="margin-top:6px">You appear as <b id="chatMe">${esc(r.me)}</b>${location.port === "8770" ? "" : ` · <a href="#" id="chatName">change</a>`}</div></div>`, true);
+  bindHeartTabs(box);
+  const draw = (r) => {
+    const log = $("#chatLog", box); if (!log) return;
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    log.innerHTML = r.messages.length ? r.messages.map((m) => `<div class="bubble ${m.mine ? "mine" : ""}"><div class="who">${esc(m.mine ? "You" : m.author)} · ${msgTime(m.created)}${m.mine ? ` · ${m.read ? "✓✓ read" : "✓ sent"}` : ""}${m.mine ? ` <a href="#" data-mdel="${m.id}" title="Delete">×</a>` : ""}</div>${esc(m.text).replace(/\n/g, "<br>")}</div>`).join("")
+      : `<div class="empty small">No messages yet. Say hi ♥</div>`;
+    $$("[data-mdel]", log).forEach((a) => a.onclick = async (e) => { e.preventDefault(); if (confirm("Delete this message for both of you?")) { await api(`/api/messages/${a.dataset.mdel}`, { method: "DELETE" }); draw(await api("/api/messages")); } });
+    if (atBottom || !draw.done) log.scrollTop = log.scrollHeight; draw.done = true;
+  };
+  draw(r);
+  const send = async () => {
+    const t = $("#chatText", box).value.trim(); if (!t) return;
+    if (!S.settings?.chat_name && location.port !== "8770") {  // first message: a real name instead of the computer's
+      const v = prompt("Which name should they see on your messages?", ""); if (!v || !v.trim()) return;
+      S.settings = await api("/api/settings", { method: "PUT", body: { chat_name: v.trim() } }); $("#chatMe", box).textContent = v.trim();
+    }
+    $("#chatText", box).value = ""; draw(await api("/api/messages", { body: { text: t } }));
+  };
+  $("#chatGo", box).onclick = send;
+  $("#chatText", box).onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+  $("#chatText", box).focus();
+  const nm = $("#chatName", box);
+  if (nm) nm.onclick = async (e) => {
+    e.preventDefault(); const v = prompt("Your name on messages:", r.me); if (v === null) return;
+    S.settings = await api("/api/settings", { method: "PUT", body: { chat_name: v.trim() } }); $("#chatMe", box).textContent = v.trim() || r.me;
+  };
+  const tick = async () => {
+    if (!MSG_OPEN || !$("#chatLog")) { MSG_OPEN = false; return; }
+    try { const n = await api("/api/messages"); if (n.unread) await api("/api/messages/read", { method: "POST" }); draw(n); } catch { }
+    setTimeout(tick, 4000);
+  };
+  setTimeout(tick, 4000);
+}
+function markHeart() { $$(".dedi-heart").forEach((h) => h.classList.toggle("has-msg", MSG_UNREAD > 0)); }
+async function pollMessages() {
+  if (document.hidden || MSG_OPEN && $("#chatLog")) return;
+  MSG_OPEN = false;
+  let r; try { r = await api("/api/messages?limit=1"); } catch { return; }
+  if (MSG_SEEN !== null && r.unread > MSG_UNREAD && r.messages.length && !r.messages[0].mine) {
+    const m = r.messages[0], t = document.createElement("div");
+    t.className = "toast ok"; t.style.cursor = "pointer"; t.innerHTML = `💌 <b>${esc(m.author)}</b>: ${esc(m.text.slice(0, 80))}${m.text.length > 80 ? "…" : ""}`;
+    t.onclick = () => { t.remove(); openMessages(); }; $("#toasts").appendChild(t); setTimeout(() => t.remove(), 9000);
+  }
+  MSG_SEEN = true; MSG_UNREAD = r.unread; markHeart();
 }
 document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
 const needLLM = () => claudeMode() ? `<div class="notice info">AI work runs in the <b>Claude app</b> on your Claude plan: AI buttons here hand the job to Claude, which saves the result back into A.F.R.A. <a href="#settings">Settings</a></div>` : llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;

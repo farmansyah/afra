@@ -62,6 +62,11 @@ folders, PDFs, documents), on Mac and Windows, within a minute. Settings and API
 the same document at the same time, both versions are kept. The database itself never sits in the cloud folder: each
 change travels as a small file, so cloud syncing can't corrupt it.
 
+### Messages behind the heart
+Click the ♥ at the bottom of any page: a little note, and a **Messages** tab to write to each other. Messages travel
+privately through the shared library (Google Drive or iCloud), so turn that on first on both computers. A red dot on
+the heart means something new arrived; read ticks show when it was read.
+
 ### Use it on your phone
 **Settings → Use on your phone** opens A.F.R.A to phones and tablets on the same Wi-Fi, protected by a 6-digit PIN.
 Read and edit everything except settings, keys and updates. Tip: *Add to Home Screen*.

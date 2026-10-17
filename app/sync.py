@@ -24,7 +24,7 @@ from .config import DATA_DIR, get_settings, save_settings
 from .version import VERSION
 
 TABLES = {"projects": "id", "papers": "id", "documents": "id", "runs": "id", "collections": "id", "quotes": "id",
-          "paper_collections": ("paper_id", "collection_id")}
+          "paper_collections": ("paper_id", "collection_id"), "messages": "id"}  # messages: notes between the two of you
 MARKER = "afra-shared.json"
 DEFAULT_FOLDER = "AFRA Shared Library"
 STATUS = {"last_sync": 0, "last_error": "", "imported": 0, "exported": 0, "imported_from": ""}

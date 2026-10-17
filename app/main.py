@@ -296,6 +296,53 @@ async def notes():
     return data
 
 
+# ---------------------------------------------------------------- messages behind the heart (travel with the shared library)
+def _me():
+    d = sync.device()
+    return d["id"], (get_settings().get("chat_name") or "").strip() or d["name"]
+
+
+@app.get("/api/messages")
+def messages(limit: int = 200):
+    me, name = _me()
+    with db.conn() as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM messages ORDER BY created DESC LIMIT ?", (limit,))][::-1]
+        unread = c.execute("SELECT COUNT(*) FROM messages WHERE device<>? AND read=0", (me,)).fetchone()[0]
+    for r in rows:
+        r["mine"] = r["device"] == me
+    return {"messages": rows, "unread": unread, "me": name, "shared": sync.enabled()}
+
+
+@app.post("/api/messages")
+async def send_message(body: dict):
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise ValueError("Write something first.")
+    me, name = _me()
+    with db.conn() as c:
+        c.execute("INSERT INTO messages (id, author, device, text, created, read) VALUES (?,?,?,?,?,0)",
+                  (db.new_id(), name, me, text[:4000], time.time()))
+    if sync.enabled():  # send now instead of waiting for the next round
+        asyncio.create_task(asyncio.to_thread(sync.run_once))
+    return messages()
+
+
+@app.post("/api/messages/read")
+def read_messages():
+    me, _ = _me()
+    with db.conn() as c:
+        c.execute("UPDATE messages SET read=? WHERE device<>? AND read=0", (time.time(), me))
+    return {"ok": True}
+
+
+@app.delete("/api/messages/{mid}")
+def delete_message(mid: str):
+    me, _ = _me()
+    with db.conn() as c:
+        c.execute("DELETE FROM messages WHERE id=? AND device=?", (mid, me))  # only your own
+    return {"ok": True}
+
+
 @app.get("/api/events")
 def events(since: float = 0):
     return {"now": time.time(), "events": [e for e in EVENTS if e["ts"] > since]}

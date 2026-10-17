@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS paper_collections (paper_id TEXT, collection_id TEXT,
 CREATE TABLE IF NOT EXISTS quotes (
   id TEXT PRIMARY KEY, paper_id TEXT NOT NULL, project_id TEXT, page TEXT, quote TEXT, comment TEXT, tag TEXT, created REAL);
 CREATE INDEX IF NOT EXISTS quotes_paper ON quotes(paper_id);
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY, author TEXT, device TEXT, text TEXT, created REAL, read REAL DEFAULT 0);
 """
 BACKUP_DIR = DATA_DIR / "backups"
 KEEP_BACKUPS = 20
