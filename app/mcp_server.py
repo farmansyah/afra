@@ -27,7 +27,8 @@ INSTRUCTIONS = """A.F.R.A is the user's own research library and manuscript tool
 - In documents, cite with Pandoc keys: [@key], [@key, p. 12; @key2] or @key found that... A.F.R.A turns them into
   APA, IEEE, Harvard, Chicago, Vancouver or MLA citations plus the reference list when exporting to Word.
 - Documents are Markdown (# headings, **bold**, tables). save_document stores them; export_word makes the .docx.
-- Prefer high-quality sources (Q1/Q2, recent, cited) and say when evidence is thin."""
+- Prefer high-quality sources (Q1/Q2, recent, cited) and say when evidence is thin.
+- A message like "A.F.R.A task <id>" means the user pressed a button in A.F.R.A: call get_task, do it, finish_task."""
 
 
 # ---------------------------------------------------------------- talking to the A.F.R.A server
@@ -60,7 +61,8 @@ def _ensure_server():
 
 def api(method: str, path: str, **kw):
     _ensure_server()
-    r = httpx.request(method, f"{URL}{path}", timeout=300, **kw)
+    headers = {"x-afra-source": "claude", **kw.pop("headers", {})}  # lets open A.F.R.A pages refresh
+    r = httpx.request(method, f"{URL}{path}", timeout=300, headers=headers, **kw)
     if r.status_code >= 400:
         try:
             detail = r.json().get("detail")
@@ -263,6 +265,28 @@ def t_slide_material(a):
     return out
 
 
+def t_get_task(a):
+    t = api("GET", f"/api/handoff/{a['task_id']}").json()
+    fmt = ("Your answer must be valid JSON in exactly the format described above (no commentary)." if t["json"]
+           else "Answer with the requested text only (no preface, no closing remarks): it is inserted into A.F.R.A as is.")
+    return (f"A.F.R.A task {t['id']} ({t['task']}). The user clicked a button in A.F.R.A and is waiting there.\n"
+            f"Do exactly what the instructions say, then call finish_task with task_id \"{t['id']}\" and your answer. "
+            f"{fmt} Don't call other tools unless the instructions need them. In the chat, just say it's done.\n\n"
+            f"<instructions role=\"system\">\n{t['system']}\n</instructions>\n\n<instructions role=\"user\">\n{t['prompt']}\n</instructions>")
+
+
+def t_finish_task(a):
+    r = api("POST", f"/api/handoff/{a['task_id']}", json={"result": a["result"]}).json()
+    if r.get("next"):
+        return f"Done: A.F.R.A received it. One more step of the same button is waiting: call get_task with task_id \"{r['next']}\"."
+    return "Done: the result is now in A.F.R.A, where the user clicked. Tell the user in one short sentence."
+
+
+def t_pending(_):
+    ts = api("GET", "/api/handoff").json()
+    return "\n".join(f"- {t['id']}: {t['task']}" for t in ts) or "No A.F.R.A tasks are waiting."
+
+
 def t_check_refs(a):
     p = _project(a.get("project", ""))
     r = api("POST", "/api/refcheck", json={"project_id": p["id"], "text": a.get("markdown", "")}).json()
@@ -324,6 +348,12 @@ TOOLS = {
                        "(e.g. (Lee, 2020) or [1]) and the matching reference list for a final References slide.",
                        {"document_id": S, "citation_style": {"type": "string", "enum": ["apa", "ieee", "harvard", "chicago", "vancouver", "mla"]}},
                        ["document_id"]),
+    "get_task": (t_get_task, "Fetch a task the user started with a button in A.F.R.A (the message names its id, e.g. "
+                 "'A.F.R.A task k3x9…'). Returns the exact instructions to carry out.", {"task_id": S}, ["task_id"]),
+    "finish_task": (t_finish_task, "Send the answer of an A.F.R.A task back; it appears in A.F.R.A where the user clicked.",
+                    {"task_id": S, "result": {**S, "description": "the answer only (text, or JSON if the task asks for JSON)"}},
+                    ["task_id", "result"]),
+    "pending_tasks": (t_pending, "List A.F.R.A tasks waiting for Claude (when the user says 'do my A.F.R.A tasks').", {}, []),
     "check_references": (t_check_refs, "Check cited papers: missing from the library, retracted, broken DOIs.",
                          {"markdown": {**S, "description": "text whose citations to check; leave out to check the whole library"},
                           "project": PROJECT}, []),

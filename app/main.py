@@ -14,9 +14,9 @@ from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import bundle, checks, claude_connect, db, phone, slides, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
+from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
-from .config import BASE_DIR, get_settings, save_settings
+from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
 from .llm import LLMError, complete, complete_json, stream_chat
 from .search import (SOURCES, fetch_page, journals_for_topic, lookup_identifier, pdf_bytes_to_text, search_all,
@@ -119,6 +119,31 @@ async def phone_gate(request: Request, call_next):
         elif phone.locked(path, request.method):
             return JSONResponse({"detail": "For safety this can only be changed on the computer itself."}, status_code=403)
     return await call_next(request)
+
+
+EVENTS: list[dict] = []  # what Claude changed through the connector, so open pages can refresh themselves
+_EVENT_PATHS = [(re.compile(r"^/api/documents/([^/]+)$"), "doc"), (re.compile(r"^/api/projects/([^/]+)/documents$"), "doc_new"),
+                (re.compile(r"^/api/projects/([^/]+)/papers"), "library"), (re.compile(r"^/api/export/docx$"), "export")]
+
+
+@app.middleware("http")
+async def claude_bridge(request: Request, call_next):
+    """Carries the page's hand-off id into the AI layer, and notes changes Claude makes through the connector."""
+    hid = request.headers.get("x-afra-handoff")
+    token = handoff.CURRENT.set(hid[:40]) if hid else None
+    try:
+        response = await call_next(request)
+    finally:
+        if token:
+            handoff.CURRENT.reset(token)
+    if request.headers.get("x-afra-source") == "claude" and request.method != "GET" and response.status_code < 400:
+        for pat, kind in _EVENT_PATHS:
+            m = pat.match(request.url.path)
+            if m:
+                EVENTS.append({"ts": time.time(), "kind": kind, "id": m.groups()[0] if m.groups() else ""})
+                del EVENTS[:-200]
+                break
+    return response
 
 
 @app.middleware("http")
@@ -241,6 +266,60 @@ def phone_login(request: Request, body: dict):
     r = JSONResponse({"ok": True})
     r.set_cookie(phone.COOKIE, token, max_age=365 * 86400, httponly=True, samesite="lax")
     return r
+
+
+NOTES = {"data": None, "ts": 0}
+NOTES_URL = "https://raw.githubusercontent.com/farmansyah/afra/main/static/notes.json"
+
+
+@app.get("/api/notes")
+async def notes():
+    """The notes behind the heart: the newest copy on GitHub (edited there, no update needed), else the last one
+    fetched, else the copy that came with this version."""
+    if NOTES["data"] and time.time() - NOTES["ts"] < 600:
+        return NOTES["data"]
+    cache = DATA_DIR / "notes-cache.json"
+    try:
+        async with httpx.AsyncClient(timeout=4) as c:
+            r = await c.get(NOTES_URL, params={"t": int(time.time() // 600)})
+            r.raise_for_status()
+            data = r.json()
+        if not isinstance(data.get("notes"), list):
+            raise ValueError("no notes")
+        cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = json.loads((STATIC / "notes.json").read_text(encoding="utf-8"))
+    NOTES.update(data=data, ts=time.time())
+    return data
+
+
+@app.get("/api/events")
+def events(since: float = 0):
+    return {"now": time.time(), "events": [e for e in EVENTS if e["ts"] > since]}
+
+
+@app.get("/api/handoff")
+def handoff_pending():
+    return handoff.pending()
+
+
+@app.get("/api/handoff/{tid}")
+async def handoff_get(tid: str):
+    return await handoff.get(tid)
+
+
+@app.post("/api/handoff/{tid}")
+def handoff_finish(tid: str, body: dict):
+    return handoff.finish(tid, body.get("result", ""))
+
+
+@app.post("/api/handoff/{tid}/cancel")
+def handoff_cancel(tid: str):
+    handoff.cancel(tid)
+    return {"ok": True}
 
 
 @app.get("/api/settings")

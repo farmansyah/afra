@@ -29,32 +29,40 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 
 // ------------------------------------------------------------------ api
 async function api(path, opts = {}) {
-  if ((opts.method || (opts.body ? "POST" : "GET")) === "POST" && !(opts.body instanceof FormData)) maybeHandoff(path, opts.body);
-  else if (opts.body instanceof FormData) maybeHandoff(path, {});
-  const init = { method: opts.method || (opts.body ? "POST" : "GET"), headers: {} };
+  const method = opts.method || (opts.body ? "POST" : "GET");
+  const ex = method === "POST" ? claudeExec(path, opts.body instanceof FormData ? {} : opts.body) : null;
+  if (!ex && method === "POST") maybeHandoff(path, opts.body instanceof FormData ? {} : opts.body);
+  const init = { method, headers: { ...(ex?.headers || {}) }, signal: ex?.signal };
   if (opts.body instanceof FormData) init.body = opts.body;
   else if (opts.body !== undefined) { init.body = JSON.stringify(opts.body); init.headers["content-type"] = "application/json"; }
-  const r = await fetch(path, init);
-  if (!r.ok) {
-    let msg = r.statusText;
-    try { const j = await r.json(); msg = j.detail || JSON.stringify(j); } catch { }
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
-  }
-  const ct = r.headers.get("content-type") || "";
-  return ct.includes("json") ? r.json() : r;
+  try {
+    const r = await fetch(path, init);
+    if (!r.ok) {
+      let msg = r.statusText;
+      try { const j = await r.json(); msg = j.detail || JSON.stringify(j); } catch { }
+      throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    }
+    const ct = r.headers.get("content-type") || "";
+    return ct.includes("json") ? await r.json() : r;
+  } catch (e) { if (e.name === "AbortError") throw new Handoff(); throw e; }
+  finally { ex?.done(); }
 }
 async function streamText(path, body, onChunk) {
-  maybeHandoff(path, body);
-  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
-  if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail; } catch { } throw new Error(m); }
-  const reader = r.body.getReader(); const dec = new TextDecoder(); let full = "";
-  while (true) {
-    const { value, done } = await reader.read(); if (done) break;
-    const piece = dec.decode(value, { stream: true }); full += piece; onChunk && onChunk(full, piece);
-  }
-  if (full.includes("[ERROR]")) toast(full.split("[ERROR]").pop().trim(), "bad");
-  refreshMeter();
-  return full.replace(/\n*\[ERROR\][\s\S]*$/, "");
+  const ex = claudeExec(path, body || {});
+  if (!ex) maybeHandoff(path, body);
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json", ...(ex?.headers || {}) }, body: JSON.stringify(body || {}), signal: ex?.signal });
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail; } catch { } throw new Error(m); }
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let full = "";
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      const piece = dec.decode(value, { stream: true }); full += piece; onChunk && onChunk(full, piece);
+    }
+    if (full.includes("[ERROR]")) toast(full.split("[ERROR]").pop().trim(), "bad");
+    refreshMeter();
+    return full.replace(/\n*\[ERROR\][\s\S]*$/, "");
+  } catch (e) { if (e.name === "AbortError") throw new Handoff(); throw e; }
+  finally { ex?.done(); }
 }
 function toast(msg, kind = "") {
   const t = document.createElement("div"); t.className = "toast " + kind; t.textContent = msg;
@@ -106,42 +114,25 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal
 class Handoff extends Error { constructor() { super("Continued in the Claude app"); this.handoff = true; } }
 const claudeMode = () => (S.settings?.ai_mode || "claude") === "claude";
 const projName = () => S.project ? `A.F.R.A project "${S.project.name}"` : "my A.F.R.A library";
-const clip = (t, n = 6000) => (t || "").length > n ? t.slice(0, n) + "\n[…]" : (t || "");
 const docTitle = () => ($("#dtitle")?.value || $("#ptitle")?.value || "").trim();
+// whole jobs (several AI steps plus searching) go to Claude as one request; one-prompt buttons use claudeExec instead
 function handoffPrompt(path, body = {}) {
-  let m;
-  if ((m = path.match(/^\/api\/papers\/([^/]+)\/summarize/))) return `Read the paper ${body.key ? "@" + body.key : "I just opened"} in ${projName()} (read_paper, with full text if available) and write my reading notes: aim, methods, key findings with numbers, limitations, and how I could cite it.`;
-  if (path === "/api/tools/run") {
-    const label = S.meta?.tools?.[body.tool] || body.tool;
-    return `${label}${body.language ? ` (language: ${body.language})` : ""}${body.extra ? `. Extra instructions: ${body.extra}` : ""}. Return only the result.
-
-<text>
-${clip(body.text)}
-</text>${docTitle() ? `
-
-It comes from my document "${docTitle()}" in ${projName()}; you may update it there with save_document if I ask.` : ""}`;
-  }
-  if (path === "/api/tools/ask-library") return `Answer from the papers in ${projName()} only (use library and read_paper), citing each claim with [@key]:
-${body.question}`;
-  if (path === "/api/tools/suggest-citations") return `Suggest which papers from ${projName()} (or new ones via search_papers) should be cited in this text, sentence by sentence, and give the text back with [@key] citations inserted:
-
-${clip(body.text)}`;
   if (path === "/api/evidence") return `Use the A.F.R.A find_evidence workflow for this claim (save good papers to ${projName()}):
 ${body.claim}`;
   if (path === "/api/research/start" || path === "/api/research/clarify") return body.query ? `Use the A.F.R.A literature_review workflow on: ${body.query}
 Save sources to ${projName()} and the review as a document.` : null;
-  if (path === "/api/gaps/analyze" || /^\/api\/gaps\/[^/]+\/write$/.test(path)) return `Find the research gaps for my topic${body.topic ? `: ${body.topic}` : ""}. Search widely with search_papers and citation_trail, show what is well covered and what is missing (each gap backed by 3-5 citations), save the papers to ${projName()} and the analysis as a document.`;
+  if (path === "/api/gaps/analyze") return `Find the research gaps for my topic${body.topic ? `: ${body.topic}` : ""}. Search widely with search_papers and citation_trail, show what is well covered and what is missing (each gap backed by 3-5 citations), save the papers to ${projName()} and the analysis as a document.`;
   if (path.startsWith("/api/manuscript/analyze")) return `I'll attach my manuscript. Review it like a strict journal reviewer, then find missing literature with search_papers and add it to ${projName()}.`;
-  if (path.startsWith("/api/paper/")) return `Use the A.F.R.A write_paper workflow for my research article "${docTitle() || "my manuscript"}" in ${projName()}. Read what I already have (list_documents / read_document) and continue from the step I'm on.`;
   if (path.startsWith("/api/journal-fit") && body.ai !== false) return `Check whether my document "${docTitle()}" in ${projName()} fits the journal I'm targeting: scope, length, structure, reference style. Read it with read_document.`;
   return null;
 }
 function showHandoff(prompt) {
   try { navigator.clipboard.writeText(prompt); } catch { }
+  openClaude(claudeLink(prompt));
   const box = modal(`<h3 style="margin-top:0">Continue in the Claude app</h3>
-    <p class="small muted" style="margin-top:0">A.F.R.A uses your Claude plan for AI work. The request below is <b>copied</b>: open Claude, start a new chat and paste it (${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}+V). Claude uses A.F.R.A to read your library and save the result here.</p>
+    <p class="small muted" style="margin-top:0">This job runs in Claude on your Claude plan. Claude opened with the request below already typed: press <b>Enter</b> there. Claude works through A.F.R.A and the results (papers, documents) appear here by themselves. If Claude didn't open, click <b>Open Claude</b> and paste (${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}+V): it's copied.</p>
     <textarea readonly style="width:100%;height:170px;font-size:12px">${esc(prompt)}</textarea>
-    <div class="row" style="margin-top:10px"><a class="btn primary" href="claude://" id="hopen">Open Claude</a><button class="btn" id="hcopy">Copy again</button><button class="btn ghost" id="hclose">Close</button>
+    <div class="row" style="margin-top:10px"><a class="btn primary" href="${esc(claudeLink(prompt))}" id="hopen">Open Claude</a><button class="btn" id="hcopy">Copy again</button><button class="btn ghost" id="hclose">Close</button>
     <span class="small muted" style="margin-left:auto">Prefer an API key? <a href="#settings" id="hset">Settings</a></span></div>`);
   $("#hcopy", box).onclick = () => { navigator.clipboard.writeText(prompt).then(() => toast("Copied", "ok")); };
   $("#hclose", box).onclick = closeModal; $("#hset", box).onclick = closeModal;
@@ -172,6 +163,41 @@ async function slidesPanel(el, title) {
   const up = $("#slup", el); if (up) up.onclick = () => { if (confirm("Download the latest PPT Master?")) go(); };
   if (st.state === "working") setTimeout(() => { if (el.isConnected) slidesPanel(el, title); }, 3000);
 }
+const EXEC = [/^\/api\/tools\/(run|ask-library|suggest-citations)$/, /^\/api\/papers\/[^/]+\/summarize$/,
+  /^\/api\/paper\/[^/]+\/(style-guide|literature|outline|review|section\/\d+|abstract)$/, /^\/api\/gaps\/[^/]+\/write$/];
+function execLabel(path, body = {}) {
+  if (path === "/api/tools/run") return S.meta?.tools?.[body.tool] || "Writing tool";
+  if (path === "/api/tools/ask-library") return "Ask your library";
+  if (path === "/api/tools/suggest-citations") return "Suggest citations";
+  if (path.endsWith("/summarize")) return "Reading notes";
+  if (path.startsWith("/api/gaps/")) return "Gap analysis write-up";
+  const step = (path.match(/\/api\/paper\/[^/]+\/([a-z-]+)/) || [])[1] || "";
+  return "Paper Writer: " + ({ "style-guide": "style guide", literature: "literature synthesis", outline: "outline", review: "reviewer check", section: "section draft", abstract: "title & abstract" }[step] || step);
+}
+const claudeLink = (text) => "claude://claude.ai/new?q=" + encodeURIComponent(text.slice(0, 12000));
+function openClaude(url) { const a = document.createElement("a"); a.href = url; document.body.appendChild(a); a.click(); a.remove(); }
+const WAITING = new Map();
+function drawWaiting() {
+  let bar = $("#claudeWait");
+  if (!WAITING.size) { if (bar) bar.remove(); return; }
+  if (!bar) { bar = document.createElement("div"); bar.id = "claudeWait"; bar.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:55;max-width:min(420px,calc(100vw - 32px));display:flex;flex-direction:column;gap:8px"; document.body.appendChild(bar); }
+  bar.innerHTML = [...WAITING.entries()].map(([id, w]) => `<div class="card" style="margin:0;padding:12px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18)">
+    <div class="small"><span class="spin"></span> <b>Claude is on it:</b> ${esc(w.label)}</div>
+    <div class="small muted" style="margin:4px 0 8px">Claude opened with the request filled in: press <b>Enter</b> there. The answer appears here by itself.</div>
+    <div class="row"><a class="btn small primary" href="${esc(w.url)}">Open Claude</a><button class="btn small ghost" data-wcancel="${id}">Cancel</button></div></div>`).join("");
+  $$("[data-wcancel]", bar).forEach((b) => b.onclick = () => WAITING.get(b.dataset.wcancel)?.cancel());
+}
+function claudeExec(path, body) {
+  if (!claudeMode() || !EXEC.some((r) => r.test(path))) return null;
+  if (location.port === "8770") throw new Error("AI tasks start from the computer: Claude runs there, not on the phone.");
+  const id = Math.random().toString(36).slice(2, 10), label = execLabel(path, body);
+  const msg = `A.F.R.A task ${id}: ${label}. Please do it (get_task, then finish_task).`, url = claudeLink(msg);
+  try { navigator.clipboard.writeText(msg); } catch { }
+  const ctrl = new AbortController();
+  WAITING.set(id, { label, url, cancel: () => { ctrl.abort(); fetch(`/api/handoff/${id}/cancel`, { method: "POST" }); } });
+  drawWaiting(); openClaude(url);
+  return { headers: { "x-afra-handoff": id }, signal: ctrl.signal, done: () => { WAITING.delete(id); drawWaiting(); } };
+}
 function maybeHandoff(path, body) {
   if (!claudeMode()) return;
   const p = handoffPrompt(path, body || {});
@@ -190,6 +216,29 @@ async function loadProjects(selectId) {
 async function refreshLibKeys() { const papers = await api(`/api/projects/${S.project.id}/papers`); LIBKEYS = new Set(papers.map((p) => p.key)); return papers; }
 function llmReady() { const s = S.settings; return s && s.llm_model && (s.llm_model_src === "2" ? (s.llm2_api_key || /localhost|127\.0\.0\.1/.test(s.llm2_base_url || "")) : (s.llm_api_key || /localhost|127\.0\.0\.1/.test(s.llm_base_url || ""))); }
 const fmtTok = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n || 0);
+let EV_SINCE = 1e12;  // first poll only learns the server's clock
+function linkToast(msg, hash) {
+  const t = document.createElement("div"); t.className = "toast ok"; t.style.cursor = "pointer";
+  t.innerHTML = `${esc(msg)} <u>Open</u>`; t.onclick = () => { location.hash = hash; t.remove(); };
+  $("#toasts").appendChild(t); setTimeout(() => t.remove(), 6000);
+}
+async function pollClaude() {
+  if (document.hidden) return;
+  let r; try { r = await api(`/api/events?since=${EV_SINCE}`); } catch { return; }
+  EV_SINCE = r.now;
+  const h = location.hash, seen = new Set();
+  for (const e of r.events) {
+    if (seen.has(e.kind + e.id)) continue; seen.add(e.kind + e.id);
+    if (e.kind === "doc") {
+      if (h === "#docs/" + e.id) {
+        if (S.pending) toast("Claude changed this document too: you'll be asked which version to keep", "warn");
+        else { docEditor(e.id); toast("Claude updated this document", "ok"); }
+      } else linkToast("Claude updated a document.", "#docs/" + e.id);
+    } else if (e.kind === "doc_new") { linkToast("Claude added a document.", "#docs"); if (h === "#docs") route(); }
+    else if (e.kind === "library") { refreshLibKeys(); if (h === "#library") route(); else linkToast("Claude added to your library.", "#library"); }
+    else if (e.kind === "export") toast("Claude saved a Word file in Documents › AFRA exports", "ok");
+  }
+}
 let SYNC_SEEN = null;
 async function refreshSync() {
   if (!S.settings?.sync_path) return;
@@ -276,6 +325,7 @@ async function boot() {
   $("#main").addEventListener("click", () => document.body.classList.remove("nav-open"));  // tap beside the menu closes it
   $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("a")) document.body.classList.remove("nav-open"); });
   setInterval(refreshMeter, 20000);
+  pollClaude(); setInterval(pollClaude, 4000);
   checkUpdates(false);
   // never lose typing: warn before leaving while a save is still pending (drafts are also kept in localStorage)
   window.addEventListener("beforeunload", (e) => { if (S.pending > 0) { e.preventDefault(); e.returnValue = ""; } });
@@ -308,10 +358,52 @@ function addFooter() {
     <div><img class="brand-logo" src="${logoUrl()}" alt=""><b>A.F.R.A</b> · Article Finder &amp; Research Assistant</div>
     <div>© ${YEARS} <b>danafarmansyah</b>. All rights reserved. · Crafted with <button class="heart dedi-heart" type="button" title="♥" aria-label="A little note">♥</button></div></footer>`);
 }
-// a small note, tucked behind the heart
-function dedication() {
-  modal(`<div class="dedi"><img src="${logoUrl()}" alt=""><h2>For Raina Afra</h2><p>This little app carries your name. I built it so your long research nights feel a little lighter, and so every paper you finish has someone quietly cheering you on.</p><div class="sig">— Dana</div>
-    <button class="btn" onclick="closeModal()">Close</button></div>`);
+// small notes, tucked behind the heart. What shows is set in static/notes.json on GitHub (see its "_how_to").
+const NOTE_FALLBACK = { title: "For Raina Afra", signature: "— Dana", per_open: 1, order: "shuffle", more_button: false,
+  notes: [{ id: "n01", on: true, text: "This little app carries your name. I built it so your long research nights feel a little lighter, and so every paper you finish has someone quietly cheering you on." }] };
+function pickNotes(cfg) {
+  const today = new Date().toISOString().slice(0, 10);
+  const only = (cfg.only || []).filter(Boolean);
+  let pool = (cfg.notes || []).filter((n) => n && n.text && (only.length ? only.includes(n.id) : n.on !== false)
+    && (!n.from || today >= n.from) && (!n.until || today <= n.until));
+  if (!pool.length) pool = NOTE_FALLBACK.notes;
+  const per = +cfg.per_open > 0 ? Math.min(+cfg.per_open, pool.length) : pool.length;
+  const pin = pool.find((n) => cfg.pin && n.id === cfg.pin);
+  const rest = pool.filter((n) => n !== pin);
+  const want = per - (pin ? 1 : 0);
+  let chosen = [];
+  const order = cfg.order || "shuffle";
+  const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } };
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  if (order === "random") {
+    chosen = [...rest].sort(() => Math.random() - .5).slice(0, want);
+  } else if (order === "in_order" || order === "newest") {
+    const list = order === "newest" ? [...rest].reverse() : rest;
+    let at = load("rt_note_pos", 0);
+    for (let i = 0; i < want && list.length; i++) chosen.push(list[(at + i) % list.length]);
+    store("rt_note_pos", (at + want) % Math.max(1, list.length));
+  } else {  // shuffle: every note once before any repeats, and never the same note twice in a row
+    let bag = load("rt_note_bag", []).filter((id) => rest.some((n) => n.id === id));
+    const last = load("rt_note_last", "");
+    while (chosen.length < want && rest.length) {
+      if (!bag.length) { bag = rest.map((n) => n.id).sort(() => Math.random() - .5); if (bag.length > 1 && bag[0] === last) bag.push(bag.shift()); }
+      const id = bag.shift(); const n = rest.find((x) => x.id === id);
+      if (n && !chosen.includes(n)) chosen.push(n);
+    }
+    store("rt_note_bag", bag); if (chosen.length) store("rt_note_last", chosen[chosen.length - 1].id);
+  }
+  return pin ? [pin, ...chosen] : chosen;
+}
+let NOTES_CFG = null;
+async function dedication() {
+  if (!NOTES_CFG) { try { NOTES_CFG = await api("/api/notes"); } catch { NOTES_CFG = NOTE_FALLBACK; } }
+  const cfg = NOTES_CFG, picked = pickNotes(cfg);
+  const title = (picked.length === 1 && picked[0].title) || cfg.title || NOTE_FALLBACK.title;
+  const pool = (cfg.notes || []).filter((n) => n.on !== false).length;
+  const box = modal(`<div class="dedi"><img src="${logoUrl()}" alt=""><h2>${esc(title)}</h2>${picked.map((n) => `<p>${esc(n.text)}</p>`).join("")}<div class="sig">${esc(cfg.signature ?? NOTE_FALLBACK.signature)}</div>
+    <div class="row" style="justify-content:center">${cfg.more_button !== false && pool > picked.length ? `<button class="btn" id="dmore">Another note ♥</button>` : ""}<button class="btn" onclick="closeModal()">Close</button></div></div>`);
+  const more = $("#dmore", box); if (more) more.onclick = () => dedication();
+  setTimeout(() => { NOTES_CFG = null; }, 10 * 60 * 1000);  // next click after 10 minutes reads the newest notes
 }
 document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
 const needLLM = () => claudeMode() ? `<div class="notice info">AI work runs in the <b>Claude app</b> on your Claude plan: AI buttons here hand the job to Claude, which saves the result back into A.F.R.A. <a href="#settings">Settings</a></div>` : llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;

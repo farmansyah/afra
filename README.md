@@ -47,9 +47,12 @@ Pro/Max plan, and A.F.R.A gives it real papers, your library, your documents and
 This works in the Claude **desktop** app (Mac and Windows). claude.ai in the browser and the phone app cannot reach
 programs on your computer.
 
-A.F.R.A uses the Claude app by default (**Settings → How A.F.R.A uses AI**). Buttons inside A.F.R.A that need AI
-(Paper Writer, Writing Tools, reading notes…) then copy a ready request and open Claude, which does the job through
-A.F.R.A and saves the result back.
+A.F.R.A uses the Claude app by default (**Settings → How A.F.R.A uses AI**). A button that needs AI (Paper Writer,
+Writing Tools, reading notes…) opens Claude with the request already typed: press **Enter** in Claude, and the answer
+appears back in A.F.R.A, in the same place an API answer would. A.F.R.A sends Claude exactly the instructions it would
+send an API, so nothing is done twice; with an API key instead (*My own API key*), the same buttons answer directly.
+Bigger jobs (Deep Research, Gap Finder, Evidence) run in Claude as one request, and pages refresh by themselves when
+Claude adds papers or edits a document.
 
 ### Share one library between two people
 **Settings → Shared library**: choose **Google Drive** or **iCloud Drive** and click *Start sharing*. Share that folder
@@ -187,6 +190,11 @@ python tools/package.py       # builds dist/AFRA.zip (keeps the Mac launcher exe
   `records/<table>/<id>.json` in the shared folder (newest wins; documents edited on both sides keep a conflict copy).
 - **Phone access:** `app/phone.py`, a second uvicorn server on 0.0.0.0:8770 behind a PIN cookie (`AFRA_PHONE_HOST`
   overrides the address for tests).
+- **Claude mode:** `app/handoff.py`. With `ai_mode=claude`, `llm.stream_chat` parks the exact prompt as a task when
+  the request carries the page's `X-AFRA-Handoff` id (else fails fast so no-AI fallbacks run); Claude fetches it
+  with `get_task` and answers with `finish_task`. Connector writes carry `X-AFRA-Source: claude` and appear in
+  `/api/events` so pages refresh.
+- **Notes behind the heart:** `static/notes.json` (fetched from GitHub every 10 minutes, cached, bundled fallback).
 - **Data location:** `RT_DATA_DIR` overrides the data folder.
 
 ---

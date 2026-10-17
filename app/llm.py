@@ -48,6 +48,10 @@ async def stream_chat(messages: list[dict], system: str = "", temperature: float
                       max_tokens: int | None = None, fast: bool = False, cache_system: bool = False,
                       task: str = "chat", role: str = "main") -> AsyncIterator[str]:
     s = get_settings()
+    if s.get("ai_mode") == "claude":  # same prompt, answered in the Claude app (see handoff.py); never an API call
+        from . import handoff
+        yield await handoff.ask(system, messages, task)
+        return
     provider, base, key, model = resolve("fast" if fast else role, s)
     max_tokens = max_tokens or int(s.get("llm_max_tokens") or 8000)
     temperature = s.get("llm_temperature", 0.4) if temperature is None else temperature
