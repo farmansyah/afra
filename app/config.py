@@ -45,9 +45,7 @@ DEFAULTS = {
     "phone_access": False,             # second, PIN-protected door on the home Wi-Fi (port 8770)
     "phone_pin": "",
     "phone_secret": "",
-    "chat_relay": "",                 # chat relay on your VPS, e.g. https://chat.example.com
-    "chat_code": "",                  # pairing code (the chat's secret key; never leaves this computer except in the phone link)
-    "chat_name": "",                  # your name on messages behind the heart (empty = this computer's name)
+    "chat_url": "https://13-222-66-73.sslip.io",  # the private chat (github.com/farmansyah/afra-chat), behind the heart
     "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
     "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }

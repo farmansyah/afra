@@ -14,7 +14,7 @@ from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import bundle, chat, checks, claude_connect, db, handoff, phone, slides, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
+from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -26,7 +26,6 @@ app = FastAPI(title="A.F.R.A: Article Finder & Research Assistant", description=
 STATIC = BASE_DIR / "static"
 db.init()
 sync.init()
-chat.init()
 
 
 async def _backup_loop():
@@ -85,8 +84,6 @@ async def _startup():
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_file_sync_loop())
     asyncio.create_task(_auto_update_loop())
-    asyncio.create_task(chat.relay_loop())
-    asyncio.create_task(chat.folder_watch())
     if get_settings().get("phone_access"):
         phone.start(app)
 
@@ -297,81 +294,6 @@ async def notes():
             data = json.loads((STATIC / "notes.json").read_text(encoding="utf-8"))
     NOTES.update(data=data, ts=time.time())
     return data
-
-
-# ---------------------------------------------------------------- private chat (relay on your VPS + shared-folder copy)
-@app.get("/api/chat")
-def chat_state(limit: int = 400):
-    return {**chat.status(), "messages": chat.messages(limit)}
-
-
-@app.get("/api/chat/status")
-def chat_status():
-    return chat.status()
-
-
-@app.get("/api/chat/stream")
-async def chat_stream(request: Request):
-    """Live updates for an open chat window (new messages, typing, online)."""
-    q: asyncio.Queue = asyncio.Queue(maxsize=100)
-    chat.SUBSCRIBERS.add(q)
-
-    async def gen():
-        try:
-            yield "event: hello\ndata: {}\n\n"
-            while not await request.is_disconnected():
-                try:
-                    ev = await asyncio.wait_for(q.get(), timeout=15)
-                    yield f"data: {json.dumps(ev)}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
-        finally:
-            chat.SUBSCRIBERS.discard(q)
-    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
-
-
-@app.post("/api/chat/send")
-def chat_send(body: dict):
-    return chat.send(body.get("text", ""), body.get("kind") or "text", body.get("reply_to", ""), body.get("attachment"))
-
-
-@app.post("/api/chat/attach")
-async def chat_attach(file: UploadFile = File(...)):
-    return chat.save_attachment(file.filename, file.content_type, await file.read())
-
-
-@app.get("/api/chat/file/{blob}")
-async def chat_file(blob: str, mime: str = "application/octet-stream", name: str = "file"):
-    p = await chat.fetch_blob(blob)
-    if not p:
-        raise HTTPException(404, "Not downloaded yet")
-    return FileResponse(p, media_type=mime, filename=name if not mime.startswith(("image/", "audio/")) else None)
-
-
-@app.post("/api/chat/read")
-def chat_read():
-    return {"marked": chat.mark_read()}
-
-
-@app.post("/api/chat/typing")
-def chat_typing():
-    chat.typing()
-    return {"ok": True}
-
-
-@app.post("/api/chat/newcode")
-def chat_newcode():
-    return {"code": chat.new_code()}
-
-
-@app.post("/api/chat/pair")
-def chat_pair(body: dict):
-    return chat.pair(body.get("code", ""), body.get("relay", ""), body.get("name", ""))
-
-
-@app.post("/api/chat/{mid}/{action}")
-def chat_change(mid: str, action: str, body: dict):
-    return chat.change(mid, action, body.get("value", ""))
 
 
 @app.get("/api/events")

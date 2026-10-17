@@ -62,17 +62,12 @@ folders, PDFs, documents), on Mac and Windows, within a minute. Settings and API
 the same document at the same time, both versions are kept. The database itself never sits in the cloud folder: each
 change travels as a small file, so cloud syncing can't corrupt it.
 
-### Private chat for two (iPhone app + A.F.R.A)
-A chat just for the two of you: text, emoji, 💌 200+ ready-made love and encouragement notes (English and Indonesian),
-photos, files, voice notes, replies, reactions, editing, deleting, search, "typing…", online status and read ticks.
-- **Instant and private:** it goes through a small relay on your own VPS (`relay/`, see its README), end-to-end
-  encrypted: the VPS only passes on scrambled data.
-- **iPhone:** open the relay's address in Safari, *Share → Add to Home Screen*, open **A.F.R.A ♥** from its icon, join
-  with your pairing code and turn on notifications. It works like an app, with real iPhone notifications.
-- **Computer:** click the ♥ at the bottom of A.F.R.A → *Messages* (first time: enter the relay address, a pairing code
-  and your name; *⋯ → Add your iPhone* gives the phone link). New messages show a system notification.
-- **Backup:** A.F.R.A on the computers also sends every message through the shared library folder, so if the VPS is
-  down, messages between the computers still arrive and nothing is lost.
+### Private chat (iPhone app + A.F.R.A)
+Click the ♥ at the bottom of A.F.R.A → **Messages** for your private chat: accounts with usernames and profile photos,
+one chat per person plus Notes to self, 💌 200+ love and encouragement notes, photos, voice notes, reactions and
+iPhone notifications that show who wrote and what. It runs on your own server and is its own project:
+[github.com/farmansyah/afra-chat](https://github.com/farmansyah/afra-chat) (setup, iPhone install and admin there).
+The chat's address is in Settings (`chat_url`).
 
 ### Use it on your phone
 **Settings → Use on your phone** opens A.F.R.A to phones and tablets on the same Wi-Fi, protected by a 6-digit PIN.
@@ -206,9 +201,7 @@ python tools/package.py       # builds dist/AFRA.zip (keeps the Mac launcher exe
   the request carries the page's `X-AFRA-Handoff` id (else fails fast so no-AI fallbacks run); Claude fetches it
   with `get_task` and answers with `finish_task`. Connector writes carry `X-AFRA-Source: claude` and appear in
   `/api/events` so pages refresh.
-- **Chat:** `static/chat/` (one app for the iPhone, served by the relay, and for A.F.R.A at `/static/chat/`),
-  `app/chat.py` (relay link, outbox, desktop notifications; rows also sync via the folder), `relay/relay.py` (FastAPI
-  WebSocket relay + Web Push). Key = PBKDF2(pairing code); messages AES-GCM; same scheme in Python and JavaScript.
+- **Chat:** a separate project (github.com/farmansyah/afra-chat); A.F.R.A only opens it (`chat_url`).
 - **Notes behind the heart:** `static/notes.json` (fetched from GitHub every 10 minutes, cached, bundled fallback).
 - **Data location:** `RT_DATA_DIR` overrides the data folder.
 

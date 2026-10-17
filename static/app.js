@@ -326,7 +326,6 @@ async function boot() {
   $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("a")) document.body.classList.remove("nav-open"); });
   setInterval(refreshMeter, 20000);
   pollClaude(); setInterval(pollClaude, 4000);
-  pollMessages(); setInterval(pollMessages, 5000);
   checkUpdates(false);
   // never lose typing: warn before leaving while a save is still pending (drafts are also kept in localStorage)
   window.addEventListener("beforeunload", (e) => { if (S.pending > 0) { e.preventDefault(); e.returnValue = ""; } });
@@ -411,29 +410,17 @@ async function dedication() {
   $("#dwrite", box).onclick = () => openMessages();
   setTimeout(() => { NOTES_CFG = null; }, 10 * 60 * 1000);  // next click after 10 minutes reads the newest notes
 }
-// ---- the private chat (static/chat): live through the relay on your VPS, with a copy through the shared folder
-let MSG_UNREAD = 0, MSG_OPEN = false, MSG_SEEN = null;
+// ---- the private chat (github.com/farmansyah/afra-chat), on your own server: open it here or in its own window
+let MSG_UNREAD = 0;
 function openMessages() {
-  MSG_OPEN = true; MSG_UNREAD = 0; markHeart();
-  const box = modal(`${heartTabs("msg", 0)}<iframe src="/static/chat/index.html" title="Chat" style="width:100%;height:min(74vh,720px);border:0;border-radius:14px;display:block;background:var(--bg)"></iframe>
-    <div class="row" style="justify-content:space-between;margin-top:8px"><a class="small" href="/static/chat/index.html" target="_blank">Open in its own window ↗</a><button class="btn small" onclick="closeModal()">Close</button></div>`, true);
+  const url = (S.settings && S.settings.chat_url) || "";
+  if (!url) return toast("Set the chat address in Settings first", "bad");
+  const box = modal(`${heartTabs("msg", 0)}<iframe src="${esc(url)}" title="Chat" allow="microphone; clipboard-write" style="width:100%;height:min(74vh,720px);border:0;border-radius:14px;display:block;background:var(--bg)"></iframe>
+    <div class="row" style="justify-content:space-between;margin-top:8px"><span class="small muted">Notifications on this computer: open the chat in its own window and turn them on there.</span>
+      <a class="btn small primary" href="${esc(url)}" target="_blank">Open in its own window ↗</a></div>`, true);
   bindHeartTabs(box);
-  const watch = setInterval(() => { if (!$("iframe[title=Chat]")) { MSG_OPEN = false; clearInterval(watch); pollMessages(); } }, 1000);
 }
 function markHeart() { $$(".dedi-heart").forEach((h) => h.classList.toggle("has-msg", MSG_UNREAD > 0)); }
-async function pollMessages() {
-  if (document.hidden || MSG_OPEN) return;
-  let st; try { st = await api("/api/chat/status"); } catch { return; }
-  if (MSG_SEEN !== null && st.unread > MSG_UNREAD) {
-    let m = null; try { const r = await api("/api/chat?limit=1"); m = r.messages[0]; } catch { }
-    if (m && m.author !== st.me) {
-      const t = document.createElement("div"), body = m.text || { image: "📷 Photo", voice: "🎤 Voice note", file: "📎 File" }[m.kind] || "New message";
-      t.className = "toast ok"; t.style.cursor = "pointer"; t.innerHTML = `💌 <b>${esc(m.author)}</b>: ${esc(body.slice(0, 80))}${body.length > 80 ? "…" : ""}`;
-      t.onclick = () => { t.remove(); openMessages(); }; $("#toasts").appendChild(t); setTimeout(() => t.remove(), 9000);
-    }
-  }
-  MSG_SEEN = true; MSG_UNREAD = st.unread; markHeart();
-}
 document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
 const needLLM = () => claudeMode() ? `<div class="notice info">AI work runs in the <b>Claude app</b> on your Claude plan: AI buttons here hand the job to Claude, which saves the result back into A.F.R.A. <a href="#settings">Settings</a></div>` : llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;
 
