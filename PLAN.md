@@ -72,7 +72,19 @@ How it differs from what A.F.R.A has today:
 5. Style from web links (Slidesgo and others).
 6. Claude app mode MCP tools, re-do and the review pass.
 
+#### Built on branch claude/sweet-hamilton-04454d (2026-10-18, not on main, untested against Google)
+- **Files:** app/google_api.py, app/designs.py, app/pptx_build.py, app/gslides.py, routes in app/main.py, 6 MCP tools, and a Slides page with 5 tabs.
+- **What it does:**
+  - Sign-in through a one-off local page, with several accounts.
+  - Without any setup, decks are saved into "My Drive/A.F.R.A Decks" when Drive for desktop is installed.
+  - PPT-ify any reading or document.
+  - A design gallery: built-in designs, several Slidesgo links at once, uploaded .pptx files and Slides links.
+  - Saved designs can be renamed, deleted or set as the default.
+- **Tests:** 27 offline tests pass. Run `python -m unittest discover -s tests -t .`
+- **Before merging:** make the Google Cloud client (README "Google" section), connect both accounts, and try each Google path with a real account.
+
 #### Decided (2026-10-18)
+- PPT-ify readings and documents, with a design gallery (built-in, several Slidesgo links, uploads). Designs can be saved, and the Drive connection should be as close to one click as possible.
 - Each person connects their own Google account, and several accounts can be connected at once.
 - Decks go into "A.F.R.A Decks" in Drive.
 - PPT Master gives both .pptx and Google Slides.
