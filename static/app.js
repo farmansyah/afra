@@ -326,6 +326,7 @@ async function boot() {
   $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("a")) document.body.classList.remove("nav-open"); });
   setInterval(refreshMeter, 20000);
   pollClaude(); setInterval(pollClaude, 4000);
+  setTimeout(chatBridge, 1500);
   checkUpdates(false);
   // never lose typing: warn before leaving while a save is still pending (drafts are also kept in localStorage)
   window.addEventListener("beforeunload", (e) => { if (S.pending > 0) { e.preventDefault(); e.returnValue = ""; } });
@@ -410,16 +411,60 @@ async function dedication() {
   $("#dwrite", box).onclick = () => openMessages();
   setTimeout(() => { NOTES_CFG = null; }, 10 * 60 * 1000);  // next click after 10 minutes reads the newest notes
 }
-// ---- the private chat (github.com/farmansyah/afra-chat), on your own server: open it here or in its own window
-let MSG_UNREAD = 0;
-function openMessages() {
+// ---- the private chat (github.com/farmansyah/afra-chat), connected without any key:
+// one chat page stays loaded (hidden) and logged in; it tells A.F.R.A the unread count and new messages, and takes
+// "share in chat" requests. The chat only answers an A.F.R.A on this computer or home network.
+let MSG_UNREAD = 0, BRIDGE = null, CHAT_ORIGIN = "", CHAT_READY = false;
+const CHAT_PENDING = [];
+function chatBridge() {
   const url = (S.settings && S.settings.chat_url) || "";
-  if (!url) return toast("Set the chat address in Settings first", "bad");
-  const box = modal(`${heartTabs("msg", 0)}<iframe src="${esc(url)}" title="Chat" allow="microphone; clipboard-write" style="width:100%;height:min(74vh,720px);border:0;border-radius:14px;display:block;background:var(--bg)"></iframe>
-    <div class="row" style="justify-content:space-between;margin-top:8px"><span class="small muted">Notifications on this computer: open the chat in its own window and turn them on there.</span>
+  if (!url || BRIDGE) return BRIDGE;
+  try { CHAT_ORIGIN = new URL(url).origin; } catch { return null; }
+  BRIDGE = document.createElement("iframe");
+  Object.assign(BRIDGE, { src: url, title: "Chat", allow: "microphone; clipboard-write; clipboard-read" });
+  BRIDGE.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;border-radius:14px;z-index:55;background:var(--bg);transition:opacity .2s";
+  document.body.appendChild(BRIDGE);
+  return BRIDGE;
+}
+function toChat(msg) {
+  if (BRIDGE && CHAT_READY) BRIDGE.contentWindow.postMessage({ source: "afra", ...msg }, CHAT_ORIGIN); else CHAT_PENDING.push(msg);
+}
+window.addEventListener("message", (e) => {
+  if (!CHAT_ORIGIN || e.origin !== CHAT_ORIGIN || !e.data || e.data.source !== "afra-chat") return;
+  const d = e.data;
+  if (d.type === "ready") { CHAT_READY = true; CHAT_PENDING.splice(0).forEach(toChat); if (typeof d.unread === "number") { MSG_UNREAD = d.unread; markHeart(); } }
+  else if (d.type === "unread") { MSG_UNREAD = d.count || 0; markHeart(); }
+  else if (d.type === "message") {
+    const t = document.createElement("div"); t.className = "toast ok"; t.style.cursor = "pointer";
+    t.innerHTML = `💌 <b>${esc(d.from)}</b>: ${esc((d.text || "").slice(0, 90))}`;
+    t.onclick = () => { t.remove(); openMessages(); }; $("#toasts").appendChild(t); setTimeout(() => t.remove(), 9000);
+    if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+      const n = new Notification(`💌 ${d.from}`, { body: d.text || "", icon: "/static/icon-512.png", tag: "afra-chat-" + d.conv });
+      n.onclick = () => { window.focus(); openMessages(); n.close(); };
+    }
+  }
+});
+function openMessages() {
+  if (!chatBridge()) return toast("Set the chat address in Settings first", "bad");
+  const url = S.settings.chat_url;
+  const box = modal(`${heartTabs("msg", 0)}<div id="chatSlot" style="width:100%;height:min(74vh,720px);border-radius:14px;background:var(--bg)"></div>
+    <div class="row" style="justify-content:space-between;margin-top:8px"><button class="btn small ghost" id="chatNotif">🔔 Notify me on this computer</button>
       <a class="btn small primary" href="${esc(url)}" target="_blank">Open in its own window ↗</a></div>`, true);
   bindHeartTabs(box);
+  const nb = $("#chatNotif", box);
+  if (!("Notification" in window) || Notification.permission !== "default") nb.remove();
+  else nb.onclick = async () => { const r = await Notification.requestPermission(); toast(r === "granted" ? "A.F.R.A will tell you about new messages ♥" : "Not allowed", r === "granted" ? "ok" : "bad"); nb.remove(); };
+  const hide = () => { Object.assign(BRIDGE.style, { width: "1px", height: "1px", opacity: "0", pointerEvents: "none" }); toChat({ type: "shown", v: false }); };
+  const place = () => {
+    const slot = $("#chatSlot"); if (!slot) { hide(); return false; }
+    const r = slot.getBoundingClientRect();
+    Object.assign(BRIDGE.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", opacity: "1", pointerEvents: "auto" });
+    return true;
+  };
+  place(); toChat({ type: "shown", v: true });
+  const iv = setInterval(() => { if (!place()) clearInterval(iv); }, 250);
 }
+function shareToChat(text) { openMessages(); toChat({ type: "compose", text }); }
 function markHeart() { $$(".dedi-heart").forEach((h) => h.classList.toggle("has-msg", MSG_UNREAD > 0)); }
 document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
 const needLLM = () => claudeMode() ? `<div class="notice info">AI work runs in the <b>Claude app</b> on your Claude plan: AI buttons here hand the job to Claude, which saves the result back into A.F.R.A. <a href="#settings">Settings</a></div>` : llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;
@@ -925,7 +970,7 @@ async function paperDialog(id, onChange) {
     <div class="card" style="margin:12px 0 0;padding:10px 12px"><div class="row" style="justify-content:space-between"><div><b>PDF</b> <span class="small muted">${p.has_pdf ? "attached" : "not attached"}${p.fulltext ? ` · full text ${p.fulltext.length.toLocaleString()} characters` : ""}${p.quotes ? ` · ${p.quotes} quotes/notes` : ""}</span></div>
       <div class="row">${p.has_pdf ? `<button class="btn small primary" id="pread">Open reader</button>` : `<button class="btn small" id="pfetch">Find open-access PDF</button>`}<label class="btn small">${p.has_pdf ? "Replace" : "Attach"} PDF<input type="file" id="pattach" accept=".pdf" hidden></label></div></div></div>
     <div class="modal-foot" style="justify-content:space-between"><div class="row"><button class="btn danger" id="pdel">Delete</button>
-      <button class="btn" id="psum">AI reading notes</button>${p.doi || p.openalex_id ? `<button class="btn ghost" data-psb="references">References</button><button class="btn ghost" data-psb="citing">Cited by</button><button class="btn ghost" data-psb="related">Related</button>` : ""}${!p.fulltext && (p.pdf_url || p.url) ? `<button class="btn" id="pft">Fetch full text</button>` : ""}</div>
+      <button class="btn ghost" id="pshare">💬 Share in chat</button><button class="btn" id="psum">AI reading notes</button>${p.doi || p.openalex_id ? `<button class="btn ghost" data-psb="references">References</button><button class="btn ghost" data-psb="citing">Cited by</button><button class="btn ghost" data-psb="related">Related</button>` : ""}${!p.fulltext && (p.pdf_url || p.url) ? `<button class="btn" id="pft">Fetch full text</button>` : ""}</div>
       <div class="row"><button class="btn" onclick="closeModal()">Close</button><button class="btn primary" id="psave">Save</button></div></div>`, true);
   $("#cpk", box).onclick = () => { navigator.clipboard.writeText(`[@${p.key}]`); toast("Copied"); };
   $$("[data-psb]", box).forEach((b) => b.onclick = () => { S.snowball = { ident: p.openalex_id || p.doi, mode: b.dataset.psb, title: p.title }; closeModal(); if (location.hash === "#search") route(); else location.hash = "#search"; });
@@ -936,6 +981,12 @@ async function paperDialog(id, onChange) {
     await api(`/api/papers/${id}`, { method: "PUT", body }); closeModal(); toast("Saved", "ok"); onChange && onChange();
   });
   $("#pdel", box).onclick = async () => { if (!confirm("Remove this paper from the library?")) return; await api(`/api/papers/${id}`, { method: "DELETE" }); closeModal(); onChange && onChange(); };
+  $("#pshare", box).onclick = () => {
+    const au = (p.authors || []).map((a) => a.family || a.given).filter(Boolean);
+    const who = au.length > 2 ? au[0] + " et al." : au.join(" & ");
+    const link = p.doi ? "https://doi.org/" + p.doi : (p.url || "");
+    closeModal(); shareToChat(`📄 ${p.title}${who || p.year ? ` (${[who, p.year].filter(Boolean).join(", ")})` : ""}${p.venue ? `\n${p.venue}` : ""}${link ? `\n${link}` : ""}`);
+  };
   $("#psum", box).onclick = (e) => busy(e.currentTarget, async () => {
     const ta = $("#e_notes"); const before = ta.value ? ta.value + "\n\n" : "";
     await streamText(`/api/papers/${id}/summarize`, {}, (full) => { ta.value = before + full; ta.scrollTop = ta.scrollHeight; });
@@ -1194,7 +1245,7 @@ async function docEditor(id) {
     <span class="sep"></span>
     <select id="dlayout" style="width:140px"><option value="split">Editor + preview</option><option value="edit">Editor only</option><option value="preview">Preview only</option></select>
     <span class="muted small" id="dwc"></span>
-    <span class="sep"></span><button class="btn small" id="dmd">Download .md</button><button class="btn small danger" id="ddel">Delete</button>
+    <span class="sep"></span><button class="btn small" id="dshare">💬 Share</button><button class="btn small" id="dmd">Download .md</button><button class="btn small danger" id="ddel">Delete</button>
   </div>
   <div id="dpanel"></div>
   <div class="editor-wrap" id="dwrap"><textarea id="dta" spellcheck="true"></textarea><div class="preview prose" id="dprev"></div></div>`;
@@ -1229,6 +1280,10 @@ async function docEditor(id) {
   $("#dexp").onclick = () => exportDialog({ markdown: ta.value, meta: { title: "", doc_type: doc.meta?.doc_type, lang: doc.meta?.lang }, template: doc.meta?.template, filenameHint: $("#dtitle").value });
   $("#dslides").onclick = () => { const box = modal(`<h2>Make slides</h2><div id="slp" class="small muted">Loading…</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`, true); slidesPanel($("#slp", box), $("#dtitle").value); };
   $("#dcite").onclick = () => citePicker((c) => insertAtCursor(ta, c));
+  $("#dshare").onclick = () => {
+    const body = ta.value.replace(/^#.*$/m, "").replace(/\[@[^\]]*\]/g, "").replace(/[#*_>`]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    shareToChat(`📝 ${$("#dtitle").value}\n\n${body.slice(0, 600)}${body.length > 600 ? "…" : ""}`);
+  };
   $("#dmd").onclick = () => download(new Blob([ta.value], { type: "text/markdown" }), ($("#dtitle").value || "document") + ".md");
   $("#ddel").onclick = async () => { if (!confirm("Delete this document?")) return; await api(`/api/documents/${id}`, { method: "DELETE" }); location.hash = "#docs"; };
   $("#dsim").onclick = (e) => busy(e.currentTarget, () => similarityCheck(ta.value, $("#dpanel")));
