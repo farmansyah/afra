@@ -14,7 +14,7 @@ from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, discovery, gaps, integrations, models, quality, research, sync, updater, writer
+from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -1040,6 +1040,22 @@ def slide_material(body: dict):
     style = body.get("style") or next((p["citation_style"] for p in db.list_projects() if p["id"] == doc["project_id"]), "apa")
     text, cited, missing = process_citations(doc["content"] or "", db.library_map(doc["project_id"]), style)
     return {"title": doc["title"], "style": style, "text": text, "references": bibliography(cited, style), "missing": missing}
+
+
+# ---------------------------------------------------------------- ResearchStudio (Microsoft) skills for the Code tab
+@app.get("/api/studio")
+def studio_status():
+    return studio.status()
+
+
+@app.post("/api/studio/setup")
+def studio_setup(body: dict):
+    return studio.setup(body.get("part") or "idea")
+
+
+@app.post("/api/studio/keys")
+def studio_keys():
+    return studio.open_env()
 
 
 # ---------------------------------------------------------------- export

@@ -163,6 +163,41 @@ async function slidesPanel(el, title) {
   const up = $("#slup", el); if (up) up.onclick = () => { if (confirm("Download the latest PPT Master?")) go(); };
   if (st.state === "working") setTimeout(() => { if (el.isConnected) slidesPanel(el, title); }, 3000);
 }
+// ------------------------------------------------------------------ ResearchStudio (Microsoft): idea cards, posters, blogs in the Code tab
+async function studioPanel(el, ctx = {}) {
+  let st = {}; try { st = await api("/api/studio"); } catch { }
+  const P = st.parts || {}, idea = P.idea || {}, reel = P.reel || {};
+  const dir = ctx.topic ? `My research direction: ${ctx.topic}.` : "My research direction: …";
+  const gap = ctx.doc ? ` My A.F.R.A gap analysis is the document "${ctx.doc}" (read it with read_document) — build on its gaps and prior work.` : "";
+  const asks = {
+    stidea: `Use idea-spark. ${dir}${gap} Give me one reviewer-defensible idea card.`,
+    stscoop: `Use scoop-check on my research idea: ${ctx.topic || "…"}. Has someone already published it?`,
+    stposter: `Use paper2poster on my paper (PDF: …). Make an editable conference poster.`,
+    stblog: `Use paper2blog on my paper (PDF: …). Write a blog post about it.`,
+  };
+  const working = st.state === "working";
+  const part = (key, p, title, blurb, btns) => `<div class="card" style="margin:0"><h3>${title}</h3>
+    ${p.installed ? `<div class="row" style="margin-top:4px;flex-wrap:wrap">${btns}</div><div class="small muted" style="margin-top:6px">${p.skills.map(esc).join(" · ")}</div>`
+      : working && st.part === key ? `<div class="small"><span class="spin"></span> ${esc(st.step)}</div>`
+      : `<p class="small" style="margin:6px 0">${blurb}</p>${st.state === "error" && st.part === key ? `<div class="notice bad small">${esc(st.error)}</div>` : ""}
+        <button class="btn primary small" data-stset="${key}" ${working ? "disabled" : ""}>Set up ${key === "idea" ? "Idea" : "Reel"}</button>`}</div>`;
+  el.innerHTML = `<p class="small" style="margin:0 0 10px"><a href="https://github.com/microsoft/ResearchStudio" target="_blank">ResearchStudio</a> by Microsoft (MIT) runs on your Claude plan in the <b>Code</b> tab of the Claude app.
+    Set it up once, then open the folder <code style="word-break:break-all">${esc(st.folder || "~/AFRA-Studio")}</code> in the Code tab and paste a request.</p>
+    <div class="grid g2" style="gap:12px">
+    ${part("idea", idea, "Idea <small class=\"muted\">before the paper</small>", "From a research direction to <b>one reviewer-defensible idea card</b> (method, falsification plan), plus a check of whether the idea is already taken. About 3 minutes to set up.",
+      `<button class="btn primary small" data-stcopy="stidea">Copy: idea card</button><button class="btn small" data-stcopy="stscoop">Copy: already taken?</button>`)}
+    ${part("reel", reel, "Reel <small class=\"muted\">after the paper</small>", "From a finished paper PDF to an <b>editable poster</b>, a blog post and an interactive viewer. Bigger: about 10 minutes and 400 MB.",
+      `<button class="btn primary small" data-stcopy="stposter">Copy: poster</button><button class="btn small" data-stcopy="stblog">Copy: blog post</button>`)}</div>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap">${idea.installed || reel.installed ? `<a class="btn small" href="claude://">Open Claude</a>` : ""}
+      ${idea.installed ? `<button class="btn small ghost" id="stkeys">Connector keys${st.openreview ? "" : " (OpenReview not set)"}</button>` : ""}
+      ${idea.installed || reel.installed ? `<button class="btn small ghost" id="stup" ${working ? "disabled" : ""}>Update ResearchStudio</button>` : ""}</div>`;
+  $$("[data-stcopy]", el).forEach((b) => b.onclick = () => navigator.clipboard.writeText(asks[b.dataset.stcopy]).then(() => toast("Copied: paste it in the Code tab", "ok")));
+  const go = async (k) => { await api("/api/studio/setup", { body: { part: k } }); studioPanel(el, ctx); };
+  $$("[data-stset]", el).forEach((b) => b.onclick = () => go(b.dataset.stset));
+  const up = $("#stup", el); if (up) up.onclick = async () => { if (!confirm("Download the latest ResearchStudio?")) return; for (const k of ["idea", "reel"]) if (P[k]?.installed) { await go(k); break; } };
+  const keys = $("#stkeys", el); if (keys) keys.onclick = () => api("/api/studio/keys", { method: "POST" }).then(() => toast("Opened the keys file: fill in OpenReview, save, close", "ok"));
+  if (working) setTimeout(() => { if (el.isConnected) studioPanel(el, ctx); }, 3000);
+}
 const EXEC = [/^\/api\/tools\/(run|ask-library|suggest-citations)$/, /^\/api\/papers\/[^/]+\/summarize$/,
   /^\/api\/paper\/[^/]+\/(style-guide|literature|outline|review|section\/\d+|abstract)$/, /^\/api\/gaps\/[^/]+\/write$/];
 function execLabel(path, body = {}) {
@@ -1634,7 +1669,9 @@ VIEWS.gaps = async () => {
       <div class="card"><h3>3 · Closest prior work (${m.table.length} of ${m.total_found || m.papers.length} found)</h3><div class="scroll" style="max-height:45vh"><table class="lib"><thead><tr><th>Paper</th><th>System</th><th>Variables</th><th>Method</th><th>Finding</th><th>Not studied</th></tr></thead><tbody>
       ${m.table.map((r) => { const p = m.papers[r.idx] || {}; return `<tr><td><span class="key">@${esc(p.key || "")}</span><div class="small">${esc((p.title || "").slice(0, 90))} (${r.year || ""})</div></td><td class="small">${esc(r.system)}</td><td class="small">${esc(r.variables)}</td><td class="small">${esc(r.method)}</td><td class="small">${esc(r.finding)}</td><td class="small">${esc(r.not_studied)}</td></tr>`; }).join("")}</tbody></table></div></div>
       <div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">4 · Gap, novelty & research questions</h3><div class="row"><button class="btn primary" id="gwrite">${doc.content ? "Rewrite" : "Write it"}</button>${doc.content ? `<a class="btn" href="#docs/${doc.id}">Open in editor</a>` : ""}</div></div>
-      <div class="prose" id="gout" style="margin-top:10px">${doc.content ? md(doc.content) : `<div class="muted small">The writer model drafts the text from the facts above, citing only these papers. Cited papers are added to your library.</div>`}</div></div>`;
+      <div class="prose" id="gout" style="margin-top:10px">${doc.content ? md(doc.content) : `<div class="muted small">The writer model drafts the text from the facts above, citing only these papers. Cited papers are added to your library.</div>`}</div></div>
+      <div class="card"><h3>5 · Next: one idea card <small class="muted">ResearchStudio IdeaSpark, Code tab</small></h3><div id="gstudio" class="small muted">Checking…</div></div>`;
+    studioPanel($("#gstudio"), { topic: m.topic || doc.title.replace("Gap analysis: ", ""), doc: doc.title });
     $("#gwrite").onclick = (e) => busy(e.currentTarget, async () => {
       const txt = await streamText(`/api/gaps/${doc.id}/write`, {}, (f) => { $("#gout").innerHTML = md(f); });
       if (!txt.trim()) return;
@@ -1698,6 +1735,7 @@ VIEWS.settings = async () => {
   <div class="card" style="margin-bottom:16px"><h3>How A.F.R.A uses AI</h3><div id="claudeBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
+  <div class="card" style="margin-bottom:16px"><h3>ResearchStudio <small class="muted">idea cards, posters, blogs</small></h3><div id="studioBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Use on your phone</h3><div id="phoneBox" class="small muted">Checking…</div></div>
   <div class="grid g2">
     <div class="card"><h3>AI connection 1</h3>
@@ -1942,6 +1980,7 @@ VIEWS.settings = async () => {
   };
   api("/api/phone").then(drawPhone).catch(() => { });
   slidesPanel($("#slidesBox"), "");
+  studioPanel($("#studioBox"));
   $("#pimp").onchange = async (e) => {
     const fd = new FormData(); fd.append("file", e.target.files[0]); toast("Importing project…");
     try { const r = await api("/api/projects/import", { body: fd }); await loadProjects(r.id); toast(`Imported “${r.name}”: ${r.papers} papers, ${r.documents} documents`, "ok"); location.hash = "#library"; }

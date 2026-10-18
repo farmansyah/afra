@@ -19,7 +19,7 @@ COOKIE = "afra_phone"
 _server = {"srv": None, "thread": None}
 _fails: dict[str, list[float]] = {}
 LOCKED = ("/api/settings", "/api/update", "/api/backups", "/api/claude", "/api/sync/enable", "/api/sync/disable",
-          "/api/phone", "/api/quality/sjr", "/api/projects/import", "/api/slides/setup", "/api/handoff")
+          "/api/phone", "/api/quality/sjr", "/api/projects/import", "/api/slides/setup", "/api/studio/setup", "/api/studio/keys", "/api/handoff")
 
 
 def lan_addresses() -> list[str]:
