@@ -133,6 +133,13 @@ writes your reports and paper sections. Splitting the work this way usually cuts
 - **Slides:** in any document click **Slides**. *Quick slides*: Claude (chat) builds an editable .pptx with a References
   slide. *Designer slides*: [PPT Master](https://github.com/hugohe3/ppt-master) by Hugo He (MIT) in the **Code** tab of the
   Claude app; A.F.R.A sets it up in one click (folder `AFRA-Slides` in your home folder). Both run on your Claude plan.
+- **Slides studio** (sidebar → **Slides**): pick readings from the library, an A.F.R.A document, uploaded PDF/DOCX/TXT/MD
+  files or pasted notes, plus numbers from a Google Sheet. The AI writes an outline you edit, then the slides (with
+  speaker notes and a References slide). Build them as **Google Slides** in your Drive (folder *A.F.R.A Decks*) and/or
+  as an editable **PowerPoint** file. Choose a design from the gallery: A.F.R.A's own, Slidesgo or other template pages
+  (paste several links at once), your own .pptx, a Google Slides deck, or a set of colours. PowerPoint files (for
+  example from PPT Master) can be turned into Google Slides too. Without a Google connection, the PowerPoint goes to
+  *My Drive › A.F.R.A Decks* when Google Drive for desktop is installed, otherwise to `AFRA-Slides/decks`.
 - **Documents:** Markdown editor with live preview, citation picker, AI tools on selected text, similarity check
   against your library, readability score and quality check.
 - **Writing Tools:** polish, paraphrase, translate EN ↔ ID, find unsupported claims, reviewer critique, response
@@ -162,6 +169,20 @@ these become *(Smith et al., 2020)* or *[1]* in the style you choose.
 - An automatic backup is made every 6 hours and before anything is deleted. The newest 20 are kept in
   `data/backups`. **Settings → Back up now** makes one at any time.
 - To move to a new computer, copy the whole `data` folder.
+
+## Google Slides and Drive (optional)
+A.F.R.A talks to Google with your own free Google Cloud client, so files only go between your computer and Google.
+Set it up once (about 5 minutes; **Slides → Google accounts** shows the same steps with links):
+1. In console.cloud.google.com create a project (e.g. *A.F.R.A*).
+2. Enable the **Google Drive API**, **Google Slides API** and **Google Sheets API**.
+3. **OAuth consent screen** (Google Auth Platform): audience *External*, leave it in **Testing**, and add every Google
+   account you will connect as a **test user**.
+4. **Clients → Create client → Desktop app**.
+5. **Download JSON** and paste its text in A.F.R.A (or save it as `data/google_client.json`), then click **Connect**.
+
+You can connect several accounts and pick one per deck. In Testing mode Google ends a sign-in after 7 days; A.F.R.A
+then shows a **Reconnect** button. A Google Picker API key is optional (without it, paste a Sheet link or upload the
+file). The client and the sign-ins stay in `data/` and are never shared.
 
 ## Official journal quartiles (optional)
 Quartiles marked **"est."** are estimated from OpenAlex citation statistics. For the official **SJR** quartiles:

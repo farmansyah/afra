@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
+from . import designs, google_api, gslides, pptx_build
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -165,6 +166,11 @@ async def llm_error(_, exc):
 @app.exception_handler(ValueError)
 async def value_error(_, exc):
     return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.exception_handler(google_api.GoogleError)
+async def google_error(_, exc):
+    return JSONResponse({"detail": str(exc), "reconnect": exc.status == 401}, status_code=exc.status)
 
 
 def _404(obj, what="Not found"):
@@ -1056,6 +1062,203 @@ def studio_setup(body: dict):
 @app.post("/api/studio/keys")
 def studio_keys():
     return studio.open_env()
+
+
+# ---------------------------------------------------------------- Slides studio: Google accounts, designs, decks
+def _attach(data: bytes, name: str, mime: str) -> Response:
+    return Response(data, media_type=mime, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
+@app.get("/api/google/client")
+def google_client():
+    return google_api.client_status()
+
+
+@app.post("/api/google/client")
+def google_client_save(body: dict):
+    return google_api.save_client(body.get("json", ""), body.get("picker_api_key"))
+
+
+@app.post("/api/google/connect")
+def google_connect(body: dict):
+    return google_api.start_connect(body.get("login_hint", ""))
+
+
+@app.get("/api/google/connect/{state}")
+def google_connect_status(state: str):
+    return google_api.connect_status(state)
+
+
+@app.get("/api/google/accounts")
+def google_accounts():
+    return {"accounts": google_api.accounts(), "client": google_api.client_status(),
+            "drive_folder": str(pptx_build.drive_root() or "")}
+
+
+@app.post("/api/google/default")
+def google_default(body: dict):
+    google_api.set_default(body["email"])
+    return {"accounts": google_api.accounts()}
+
+
+@app.post("/api/google/disconnect")
+def google_disconnect(body: dict):
+    return google_api.disconnect(body["email"])
+
+
+@app.get("/api/google/picker")
+def google_picker(account: str = ""):
+    return google_api.picker_info(account or None)
+
+
+@app.post("/api/google/sheets/read")
+async def google_sheet_read(body: dict):
+    return await asyncio.to_thread(gslides.read_sheet, body["link"], body.get("range", ""), body.get("account") or None)
+
+
+@app.post("/api/google/sheets/upload")
+async def google_sheet_upload(file: UploadFile = File(...), account: str = ""):
+    data = await file.read()
+    return await asyncio.to_thread(gslides.upload_sheet, data, file.filename or "data.xlsx", account or None)
+
+
+@app.get("/api/google/pptmaster")
+def google_pptmaster():
+    return {"folder": str(slides.FOLDER), "files": gslides.pptmaster_files()}
+
+
+@app.post("/api/google/pptx-to-slides")
+async def google_pptx_to_slides(body: dict):
+    return await asyncio.to_thread(gslides.pptx_to_slides, body.get("path", ""), None, "", body.get("account") or None)
+
+
+@app.post("/api/google/pptx-upload")
+async def google_pptx_upload(file: UploadFile = File(...), account: str = ""):
+    data = await file.read()
+    return await asyncio.to_thread(gslides.pptx_to_slides, "", data, file.filename or "Deck.pptx", account or None)
+
+
+@app.get("/api/designs")
+def designs_list():
+    return {"designs": designs.all_designs(), "how": designs.HOW}
+
+
+@app.post("/api/designs")
+async def designs_add(body: dict):
+    """One or several links (template pages, Google Slides links), one per line."""
+    return await asyncio.to_thread(gslides.add_designs, body.get("links", ""), body.get("account") or None)
+
+
+@app.post("/api/designs/pptx")
+async def designs_add_pptx(file: UploadFile = File(...)):
+    data = await file.read()
+    if not (file.filename or "").lower().endswith(".pptx"):
+        raise ValueError("Upload a PowerPoint .pptx file (a .potx or .ppt: save it as .pptx first).")
+    return designs.add_pptx(data, file.filename)
+
+
+@app.post("/api/designs/colors")
+def designs_add_colors(body: dict):
+    return designs.from_colors(body.get("name", ""), body.get("colors") or [], body.get("fonts") or [])
+
+
+@app.post("/api/designs/restore")
+def designs_restore():
+    return {"designs": designs.restore_builtins()}
+
+
+@app.patch("/api/designs/{did}")
+def designs_update(did: str, body: dict):
+    return designs.update(did, body.get("name"), bool(body.get("default")))
+
+
+@app.delete("/api/designs/{did}")
+async def designs_delete(did: str):
+    return await asyncio.to_thread(gslides.forget_design, did)
+
+
+@app.get("/api/designs/{did}/thumb")
+def designs_thumb(did: str):
+    data, mime = designs.thumb(did)
+    return Response(data, media_type=mime, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/decks")
+def decks_list(account: str = ""):
+    return {"decks": gslides.decks(account or None), "accounts": google_api.accounts(),
+            "drive_folder": str(pptx_build.drive_root() or "")}
+
+
+@app.get("/api/decks/drive")
+def decks_drive():
+    root = pptx_build.drive_root()
+    return {"found": bool(root), "folder": str(root / pptx_build.FOLDER_NAME) if root else "",
+            "fallback": str(slides.FOLDER / "decks")}
+
+
+@app.post("/api/decks/materials")
+async def decks_material(file: UploadFile = File(...)):
+    data = await file.read()
+    return await asyncio.to_thread(gslides.add_material, file.filename or "file.txt", data)
+
+
+@app.post("/api/decks/outline")
+async def decks_outline(body: dict):
+    return await gslides.outline(body)
+
+
+@app.post("/api/decks/content")
+async def decks_content(body: dict):
+    return await gslides.content(body)
+
+
+@app.post("/api/decks/fit")
+def decks_fit(body: dict):
+    """Content written elsewhere (the chat, the MCP tools): clean it and split what would not fit."""
+    return gslides.finish_content([gslides._clean(s, s) for s in body.get("slides") or [] if isinstance(s, dict)],
+                                  body.get("project_id", ""), body.get("notes", True))
+
+
+@app.post("/api/decks/build")
+def decks_build(body: dict):
+    return gslides.build(body)
+
+
+@app.get("/api/decks/jobs/{jid}")
+def decks_job(jid: str):
+    return gslides.job(jid)
+
+
+@app.get("/api/decks/{did}")
+def decks_get(did: str):
+    return gslides.deck(did)
+
+
+@app.delete("/api/decks/{did}")
+def decks_forget(did: str):
+    gslides.forget_deck(did)
+    return {"ok": True}
+
+
+@app.get("/api/decks/{did}/export")
+async def decks_export(did: str, fmt: str = "pptx"):
+    data, name = await asyncio.to_thread(gslides.export_deck, did, fmt)
+    return _attach(data, name, "application/pdf" if fmt == "pdf" else google_api.MIME_PPTX)
+
+
+@app.post("/api/decks/{did}/slide")
+async def decks_slide(did: str, body: dict):
+    return await asyncio.to_thread(gslides.update_slide, did, int(body["index"]), body.get("slide") or {})
+
+
+@app.post("/api/decks/{did}/redo")
+async def decks_redo(did: str, body: dict):
+    return await gslides.redo(did, int(body["index"]), body.get("action", "rewrite"), body.get("instruction", ""))
+
+
+@app.post("/api/decks/{did}/restyle")
+def decks_restyle(did: str, body: dict):
+    return gslides.restyle(did, body["design_id"], body.get("targets"))
 
 
 # ---------------------------------------------------------------- export

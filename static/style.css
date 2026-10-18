@@ -273,3 +273,26 @@ table.lib tr:hover td { background: var(--panel-2); cursor: pointer; }
 .dedi-tabs button { border: 0; background: none; padding: 6px 12px; border-radius: 999px; font: 600 13px var(--sans); color: var(--muted); cursor: pointer; }
 .dedi-tabs button.on { background: var(--accent-soft); color: var(--ink); }
 .dedi-badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 999px; background: #e5484d; color: #fff; font-size: 11px; line-height: 18px; }
+
+/* ---------------------------------------------------------------- Slides studio */
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+.dgal { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.dgal.small-gal { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.dcard { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.small-gal .dcard { cursor: pointer; }
+.small-gal .dcard:hover { border-color: var(--hover-line); }
+.dcard.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.dcard img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--subtle); }
+.dcard .dmeta { padding: 8px 10px; }
+.dcard .t { font-weight: 600; font-size: 13px; }
+.small-gal .dcard .dmeta { padding: 6px 8px; font-size: 12px; }
+.dcard .sw { display: flex; gap: 3px; margin: 5px 0 3px; }
+.dcard .sw i { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--line); }
+.orow { display: flex; gap: 6px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid var(--line-2); }
+.orow > select { width: 110px; flex: none; }
+.orow .grow { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.orow .col { display: flex; flex-direction: column; gap: 3px; }
+.orow .col button { border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2); border-radius: 6px; width: 26px; height: 24px; cursor: pointer; }
+.srow { border-bottom: 1px solid var(--line-2); padding: 6px 0; }
+.srow summary { cursor: pointer; font-size: 13px; }
+.srow > input, .srow > textarea { margin-top: 5px; }
