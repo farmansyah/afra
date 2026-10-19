@@ -38,7 +38,7 @@ own computer, in your web browser, and keeps all your data on your computer.
 With the [Claude desktop app](https://claude.ai/download), Claude does the thinking and writing on your Claude
 Pro/Max plan, and A.F.R.A gives it real papers, your library, your documents and the Word export.
 1. In A.F.R.A open **Settings → Connect to Claude** (the Mac installer does this already), then quit and reopen Claude.
-2. In Claude, click **+ → A.F.R.A** and pick a workflow: *Coursework / Tugas*, *Literature review*, *Find evidence*,
+2. In Claude, click **+ → Connectors → afra** (make sure it is switched on) and pick a workflow: *Coursework / Tugas*, *Literature review*, *Find evidence*,
    *Write a paper*, *Review my draft* or *Make slides*. Or just ask, e.g. "find 10 Q1 papers on monetite cement and add them to my
    library", "write my assignment from document X, APA, 1500 words, then export it to Word".
 3. References only come from real databases, land in your A.F.R.A library, and the finished file is saved to

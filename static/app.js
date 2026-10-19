@@ -1917,7 +1917,7 @@ VIEWS.settings = async () => {
   $("#autoupd").onchange = async (e) => { S.settings = await api("/api/settings", { method: "PUT", body: { auto_update: e.target.checked } }); toast(e.target.checked ? "Automatic updates on" : "Automatic updates off", "ok"); };
   const drawClaude = (c) => {
     const box = $("#claudeBox"); if (!box) return;
-    const how = `In Claude, click <b>+</b> → <b>A.F.R.A</b> and pick a workflow (Coursework / Tugas, Literature review, Find evidence, Write a paper, Review my draft), or just ask Claude to find papers, write into your documents and export to Word.`;
+    const how = `In Claude, click <b>+</b> → <b>Connectors</b> → <b>afra</b> (make sure it is switched on) and pick a workflow (Coursework / Tugas, Literature review, Find evidence, Write a paper, Review my draft), or just ask Claude to find papers, write into your documents and export to Word.`;
     const mode = `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;color:var(--ink)">
         <label style="display:flex;gap:8px;align-items:flex-start"><input type="radio" name="aimode" value="claude" ${claudeMode() ? "checked" : ""}><span><b>Claude app</b> (recommended): AI work runs on your Claude Pro/Max plan. No API key, no extra cost.</span></label>
         <label style="display:flex;gap:8px;align-items:flex-start"><input type="radio" name="aimode" value="api" ${claudeMode() ? "" : "checked"}><span><b>My own API key</b>: A.F.R.A's AI buttons call the model directly (set it up in AI connection below, billed per use).</span></label></div>`;
