@@ -48,25 +48,45 @@ def status() -> dict:
             "config_file": str((installed or files)[0])}
 
 
+def snippet() -> str:
+    """The lines to paste inside "mcpServers" in Claude's settings when A.F.R.A can't write the file itself."""
+    return json.dumps({NAME: entry()}, indent=2)[1:-1].strip("\n")
+
+
 def connect() -> dict:
     files = [f for f in config_files() if f.parent.exists()]
     if not files:
         raise ValueError("The Claude desktop app is not installed on this computer (claude.com/download). "
                          "Install it, sign in once, then click Connect again.")
+    written = 0
     for f in files:
         cfg = _read(f)
-        if f.exists():
-            shutil.copy2(f, f.with_suffix(".json.bak"))
         cfg.setdefault("mcpServers", {})[NAME] = entry()
-        tmp = f.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-        os.replace(tmp, f)
-    return status()
+        try:
+            if f.exists():
+                try:
+                    shutil.copy2(f, f.with_suffix(".json.bak"))
+                except OSError:
+                    pass  # no backup is better than no connection
+            tmp = f.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            os.replace(tmp, f)
+            written += 1
+        except OSError:
+            continue  # Windows can refuse writes to Claude's folder (e.g. when A.F.R.A was started from inside Claude)
+    out = status()
+    if not written:
+        out.update(blocked=True, snippet=snippet())
+    return out
 
 
 if __name__ == "__main__":
     try:
         s = connect()
-        print("Connected A.F.R.A to the Claude app. Quit and reopen Claude to see it.")
+        if s.get("blocked"):
+            print("Windows didn't let A.F.R.A change Claude's settings. In Claude open Settings > Developer > Edit Config, "
+                  'and add these lines inside "mcpServers":\n' + s["snippet"])
+        else:
+            print("Connected A.F.R.A to the Claude app. Quit and reopen Claude to see it.")
     except ValueError as e:
         print(e)
