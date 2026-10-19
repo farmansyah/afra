@@ -201,7 +201,7 @@ AFRA already spaces out its Semantic Scholar requests and caches the answers.
 ## For developers
 ```bash
 pip install -r requirements.txt
-python run.py                 # --port 8765 --no-browser --host 127.0.0.1
+python run.py                 # --port 8778 --no-browser --host 127.0.0.1
 python tools/package.py       # builds dist/AFRA.zip (keeps the Mac launcher executable)
 ```
 - **Stack:** FastAPI and SQLite on the backend; a single-page frontend in plain JavaScript (`static/`), with no build

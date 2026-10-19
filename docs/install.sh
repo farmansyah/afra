@@ -12,7 +12,7 @@
 main() {
   set -euo pipefail
   DIR="$HOME/AFRA"
-  PORT=8765
+  PORT=8778
   URL="http://localhost:$PORT"
   LABEL="com.danafarmansyah.afra"
   PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"

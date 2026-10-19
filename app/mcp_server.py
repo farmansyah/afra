@@ -19,7 +19,7 @@ from pathlib import Path
 import httpx
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-URL = os.environ.get("AFRA_URL", "http://127.0.0.1:8765")
+URL = os.environ.get("AFRA_URL", "http://127.0.0.1:8778")
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = """A.F.R.A is the user's own research library and manuscript tool, running on their computer.
 - Find real papers with search_papers / citation_trail. Never invent references: cite only papers that are in the
