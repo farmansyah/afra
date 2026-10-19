@@ -377,3 +377,26 @@ table.lib tr:hover td { background: var(--panel-2); cursor: pointer; }
 .wf.big [contenteditable]:hover { outline: 1px dashed var(--accent-2); } .wf.big [contenteditable]:focus { outline: 2px solid var(--accent); background: #f5f9ff; }
 .wf [contenteditable]:empty::before { content: attr(data-ph); color: #9aa3b2; }
 .cw-item .wf { max-width: 260px; }
+
+/* chat pop-up: a bubble bottom right and a small window that leaves the page usable */
+#chatFab { position: fixed; right: 18px; bottom: 18px; z-index: 56; width: 54px; height: 54px; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--side); color: #fff; font-size: 24px; box-shadow: 0 6px 20px rgba(0,0,0,.28); display: grid; place-items: center; transition: transform .15s; }
+#chatFab:hover { transform: scale(1.06); }
+#chatFab .cf-n { position: absolute; top: -3px; right: -3px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--bad);
+  color: #fff; font: 700 11px/20px system-ui, sans-serif; box-shadow: 0 0 0 2px var(--panel); }
+#chatPop { position: fixed; right: 18px; bottom: 84px; z-index: 56; width: 380px; height: min(620px, calc(100vh - 110px)); display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 16px 44px rgba(0,0,0,.28); overflow: hidden; }
+#chatPop[hidden] { display: none; }
+#chatPop.big { width: min(760px, calc(100vw - 36px)); height: calc(100vh - 110px); }
+#chatPop .cp-head { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+#chatPop .cp-btn { border: 0; background: transparent; color: var(--ink); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 15px;
+  display: grid; place-items: center; text-decoration: none; }
+#chatPop .cp-btn:hover { background: var(--bg); }
+#chatSlot { flex: 1; background: var(--bg); }
+body.chat-open #toasts { bottom: 84px; right: 410px; }
+body:not(.chat-open) #toasts { bottom: 84px; }
+@media (max-width: 700px) {
+  #chatPop, #chatPop.big { right: 0; bottom: 0; width: 100vw; height: 100dvh; border-radius: 0; z-index: 58; }
+  body.chat-open #chatFab { display: none; }
+  body.chat-open #toasts { right: 18px; }
+}

@@ -377,7 +377,7 @@ async function boot() {
   $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("a")) document.body.classList.remove("nav-open"); });
   setInterval(refreshMeter, 20000);
   pollClaude(); setInterval(pollClaude, 4000);
-  setTimeout(chatBridge, 1500);
+  setTimeout(() => { chatBridge(); chatFab(); }, 1500);
   checkUpdates(false);
   // never lose typing: warn before leaving while a save is still pending (drafts are also kept in localStorage)
   window.addEventListener("beforeunload", (e) => { if (S.pending > 0) { e.preventDefault(); e.returnValue = ""; } });
@@ -495,28 +495,62 @@ window.addEventListener("message", (e) => {
     }
   }
 });
-function openMessages() {
-  if (!chatBridge()) return toast("Set the chat address in Settings first", "bad");
-  const url = S.settings.chat_url;
-  const box = modal(`${heartTabs("msg", 0)}<div id="chatSlot" style="width:100%;height:min(74vh,720px);border-radius:14px;background:var(--bg)"></div>
-    <div class="row" style="justify-content:space-between;margin-top:8px"><button class="btn small ghost" id="chatNotif">🔔 Notify me on this computer</button>
-      <a class="btn small primary" href="${esc(url)}" target="_blank">Open in its own window ↗</a></div>`, true);
-  bindHeartTabs(box);
-  const nb = $("#chatNotif", box);
+// the chat as a pop-up on every page: a bubble bottom right (with the unread count) opens a small window that never
+// blocks the page; it can be made bigger or popped out. The one chat frame is laid over the window's slot, so it stays logged in.
+function chatPop() {
+  let pop = $("#chatPop");
+  if (pop) return pop;
+  pop = document.createElement("div"); pop.id = "chatPop"; pop.hidden = true;
+  pop.innerHTML = `<div class="cp-head"><b>💌 Chat</b><span class="grow"></span>
+    <button class="cp-btn" id="cpNotif" title="Notify me about new messages on this computer">🔔</button>
+    <button class="cp-btn" id="cpBig" title="Bigger">⤢</button>
+    <a class="cp-btn" id="cpOut" target="_blank" title="Open in its own window">↗</a>
+    <button class="cp-btn" id="cpMin" title="Minimise">–</button></div><div id="chatSlot"></div>`;
+  document.body.appendChild(pop);
+  $("#cpOut", pop).href = S.settings.chat_url;
+  $("#cpOut", pop).onclick = () => closeChat();
+  $("#cpMin", pop).onclick = () => closeChat();
+  $("#cpBig", pop).onclick = () => { pop.classList.toggle("big"); try { localStorage.setItem("afra_chat_big", pop.classList.contains("big") ? "1" : ""); } catch { } };
+  try { if (localStorage.getItem("afra_chat_big")) pop.classList.add("big"); } catch { }
+  const nb = $("#cpNotif", pop);
   if (!("Notification" in window) || Notification.permission !== "default") nb.remove();
   else nb.onclick = async () => { const r = await Notification.requestPermission(); toast(r === "granted" ? "A.F.R.A will tell you about new messages ♥" : "Not allowed", r === "granted" ? "ok" : "bad"); nb.remove(); };
-  const hide = () => { Object.assign(BRIDGE.style, { width: "1px", height: "1px", opacity: "0", pointerEvents: "none" }); toChat({ type: "shown", v: false }); };
-  const place = () => {
-    const slot = $("#chatSlot"); if (!slot) { hide(); return false; }
-    const r = slot.getBoundingClientRect();
-    Object.assign(BRIDGE.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", opacity: "1", pointerEvents: "auto" });
-    return true;
-  };
-  place(); toChat({ type: "shown", v: true });
-  const iv = setInterval(() => { if (!place()) clearInterval(iv); }, 250);
+  return pop;
 }
+let CHAT_IV = 0;
+function placeChat() {
+  const pop = $("#chatPop"), slot = $("#chatSlot");
+  if (!BRIDGE || !pop || pop.hidden || !slot) return;
+  const r = slot.getBoundingClientRect();
+  Object.assign(BRIDGE.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", opacity: "1", pointerEvents: "auto", zIndex: "59" });
+}
+function closeChat() {
+  const pop = $("#chatPop"); if (pop) pop.hidden = true;
+  document.body.classList.remove("chat-open"); clearInterval(CHAT_IV);
+  if (BRIDGE) Object.assign(BRIDGE.style, { width: "1px", height: "1px", opacity: "0", pointerEvents: "none" });
+  toChat({ type: "shown", v: false });
+}
+function openMessages() {
+  if (!chatBridge()) return toast("Set the chat address in Settings first", "bad");
+  if ($(".modal")) closeModal();  // opened from the heart's note
+  const pop = chatPop(); pop.hidden = false; document.body.classList.add("chat-open");
+  placeChat(); toChat({ type: "shown", v: true });
+  clearInterval(CHAT_IV); CHAT_IV = setInterval(placeChat, 250);
+}
+function toggleChat() { const pop = $("#chatPop"); pop && !pop.hidden ? closeChat() : openMessages(); }
+function chatFab() {
+  if (!(S.settings && S.settings.chat_url) || $("#chatFab")) return;
+  const b = document.createElement("button"); b.id = "chatFab"; b.type = "button"; b.title = "Chat"; b.setAttribute("aria-label", "Chat");
+  b.innerHTML = `💌<span class="cf-n" hidden></span>`; b.onclick = toggleChat;
+  document.body.appendChild(b); markHeart();
+}
+window.addEventListener("resize", placeChat);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("chat-open") && !$(".modal")) closeChat(); });
 function shareToChat(text) { openMessages(); toChat({ type: "compose", text }); }
-function markHeart() { $$(".dedi-heart").forEach((h) => h.classList.toggle("has-msg", MSG_UNREAD > 0)); }
+function markHeart() {
+  $$(".dedi-heart").forEach((h) => h.classList.toggle("has-msg", MSG_UNREAD > 0));
+  const n = $("#chatFab .cf-n"); if (n) { n.hidden = !MSG_UNREAD; n.textContent = MSG_UNREAD > 99 ? "99+" : MSG_UNREAD; }
+}
 document.addEventListener("click", (e) => { if (e.target.closest(".dedi-heart")) dedication(); });
 const needLLM = () => claudeMode() ? `<div class="notice info">AI work runs in the <b>Claude app</b> on your Claude plan: AI buttons here hand the job to Claude, which saves the result back into A.F.R.A. <a href="#settings">Settings</a></div>` : llmReady() ? "" : `<div class="notice">AI model is not configured yet. Go to <a href="#settings">Settings</a> and enter your API key (OpenAI, Anthropic, DeepSeek, OpenRouter, Gemini, or a local Ollama model).</div>`;
 
