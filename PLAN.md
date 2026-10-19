@@ -113,3 +113,24 @@ A dedicated **Tugas** page in the sidebar: a Finder-style view of real folders o
   - First try the site's own free .pptx download.
   - Otherwise A.F.R.A starts Edge or Chrome headless with a loopback debugging port. REA (`rea inspect-web-page`, `rea capture-web-screenshot`) captures the preview slides. A GLM vision model through OpenRouter turns each preview into a layout spec, and `pptx_build` renders it as an editable .pptx.
   - When REA or a GLM key is missing, say so plainly and keep the direct-download path working.
+
+### Create into PPT: the full workflow (asked 2026-10-19, step 4 after the Tugas steps)
+Every deck goes through one wizard. Google Drive, Docs, Slides and Sheets are connected throughout (through the Slides studio's Google connection).
+
+#### Two ways in
+1. **Topic or description first:** the user gives a topic, or paragraphs describing what the deck should cover.
+   - The AI researches it with A.F.R.A's real paper search (Deep Research / Paper Writer, real citations only) and writes an essay first.
+   - The essay is shown as text and can be exported as a PDF, a Word file or a Google Doc.
+   - The user can edit it or ask for changes. Only once the user approves it does **Create into PPT** appear.
+2. **Upload an essay or documents:** text, Word, PDF or a Google Doc. The AI analyses them and decides what goes on the slides (key points, figures, tables, quotes); the user can change this in the review steps.
+
+#### The wizard
+1. **Content:** the approved essay or the uploaded documents, plus options (number of slides, audience, language, speaker notes, academic or punchy).
+2. **Design:** pick one from the design selection (built-in, the Designs folder, imported links), or provide one now as a .pptx upload, a PDF upload (slides exported as PDF: A.F.R.A reads colours, fonts and layouts from the page images, using the same GLM vision step as link imports) or a link to a deck or template.
+3. **Mockup review:** every slide shown as a plain wireframe with no design: the layout (title, bullets, two columns, image left, chart, table, quote), the text and the figure placeholders. The user can reorder, add, delete and merge slides, edit the text, swap a slide's layout, and ask the AI to rewrite one slide. Nothing is built yet.
+4. **Final review:** the wireframes next to the chosen design's thumbnails, with checks flagged (too much text, missing source, empty placeholder), the output choice (.pptx in the Tugas folder, Google Slides in "A.F.R.A Decks", or both) and where it is saved.
+5. **Create:** the AI builds the deck in the chosen design. When it's done: open in PowerPoint or Google Slides, or show in the Tugas folder.
+
+#### Notes
+- The wizard can be started from a Tugas folder, from a document or reading, and from the Slides page. The "New deck" button from step 2 becomes the start of this wizard.
+- The mockup is the contract: the build follows it exactly, and only the design changes how it looks.
