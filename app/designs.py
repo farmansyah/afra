@@ -334,6 +334,15 @@ def _folder_info(p: Path) -> dict | None:
     return info
 
 
+def sidecar(p: Path) -> dict:
+    """The "<file>.source.json" next to a design file (link, credit, how it was made), {} when there is none."""
+    try:
+        d = json.loads(p.with_name(p.name + ".source.json").read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def folder_files() -> list[Path]:
     out = []
     for dirpath, dirs, files in os.walk(folder()):
@@ -359,9 +368,11 @@ def folder_designs(rows: list[dict] | None = None) -> list[dict]:
                 continue
             rid = "fd" + hashlib.sha1(p.relative_to(base).as_posix().lower().encode("utf-8")).hexdigest()[:10]
             t = {k: v for k, v in info.items() if k not in ("layouts", "size", "slides", "thumb")}
+            side = sidecar(p)
             out.append({"id": rid, "name": p.stem[:120], "kind": "pptx", "theme": t, "layouts": [x for x in info["layouts"] if x],
-                        "slide_size": info["size"], "slides": info["slides"], "source": "Designs folder", "source_url": "",
-                        "default": False, "added": p.stat().st_mtime, "folder_path": str(p)})
+                        "slide_size": info["size"], "slides": info["slides"], "source": "Designs folder", "source_url": side.get("source_url", ""),
+                        "default": False, "added": p.stat().st_mtime, "folder_path": str(p),
+                        "rebuilt": side.get("method") == "rebuilt", "credit": side.get("attribution", "")})
         except OSError:
             continue
     if THUMBS.exists():  # forget the cache of files that changed or are gone

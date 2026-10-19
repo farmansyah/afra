@@ -151,3 +151,25 @@ Every deck goes through one wizard. Google Drive, Docs, Slides and Sheets are co
 - **Output:** .pptx into a Tugas folder (folder picker), Google Slides (the .pptx converted), or both. Without a Google account the Google parts say "Connect a Google account first: Settings › Google." and the .pptx still works.
 - **Tests:** 121 pass (`tests/test_wizard.py` adds 38). Smoke-tested in the browser on port 8777: blank path, inline edits, ops, resume, review, create, essay approval gate, and the Claude-app hand-off for analyse, outline and slides.
 - **Not verified:** real AI output, Deep Research end to end with a key, any Google call, the vision step with a real key, opening the files in real PowerPoint.
+
+### Several sources at once, and cheatsheets (asked 2026-10-19)
+#### Several documents as the source
+- Everywhere a deck or essay starts from "a document or reading" (the Slides page card, the Create into PPT wizard's Content step, Tugas New deck), people can pick **several**: A.F.R.A documents, library papers, uploaded files and files in a Tugas folder, mixed.
+- The AI reads them together. Each slide keeps track of which source it came from, so citations and the references slide list every source used, and the mockup shows a slide's source.
+- Long sets are summarised per source first, then merged, so nothing is cut off by the model's context.
+
+#### Cheatsheets
+- **From many lectures, documents and materials at once:** lecture slides (.pptx and PDF), Word, PDF, notes, A.F.R.A documents and papers, and whole Tugas folders.
+- **Output:** a dense, printable cheatsheet: definitions, formulas, key concepts, steps, comparisons and short examples, grouped by topic, with a small source tag on each item.
+- **Options:** length (1 page, 2 pages, or both sides of A4), columns (2 or 3), font size, what to include (definitions, formulas, examples, dates and names), and language.
+- **Review first:** the AI proposes the sections and items; the person can tick items off, move them or edit them before the file is made.
+- **Formats:** Word (.docx, real columns), PDF, and Google Doc. Saved into a Tugas folder.
+- **Where it starts:** select several files in a Tugas folder and choose **Make cheatsheet**; a **Cheatsheet** page in the sidebar; and from the Create into PPT sources.
+
+### Free Slidesgo templates, rebuilt from their previews (2026-10-19)
+- Slidesgo's real .pptx needs a sign-in, so A.F.R.A no longer tries it. A theme page marked **Free** is rebuilt from its public slide previews (media.slidesgo.com, the largest variant of each slide); **Premium** stops with "This template is for paid members only". Never a login, never a third-party downloader.
+- Previews: REA (headless browser) adds the picture addresses it sees; the page's own HTML lists every slide as well, so a missing REA or browser only gets a note. They are downloaded (size and time caps) into `data/slidesgo_previews`, and removed afterwards.
+- Engine by AI mode: **API** = GLM vision per preview, then `pptx_build`; **Claude app** = a task (`handoff.create`, kind "design") telling Claude to rebuild it with PPT Master; Claude hands the file back with the MCP tool `save_design(task_id, pptx_path)` (checked as a real .pptx, saved in the Designs folder with its sidecar, task finished). No OpenRouter key is needed in Claude mode.
+- The sidecar credit reads "Rebuilt from Slidesgo (free template) — not the original file. Template by Slidesgo / Freepik: keep the credits slide."; the design list shows a **Rebuilt** badge. "Add from links" shows a status per link, including "Waiting for Claude" with an Open Claude button.
+- Code: `app/slidesgo.py`, hooks in `template_import.py`, `handoff.create`, `/api/designs/rebuilt/{task}`, `save_design` in `mcp_server.py`. Tests: `tests/test_slidesgo.py`.
+- **Not verified:** a real GLM key run, a real Claude + PPT Master rebuild, the browser UI by eye.

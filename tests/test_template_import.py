@@ -129,31 +129,16 @@ class DirectDownloadTest(ImportTestCase):
         self.assertEqual(again["status"], "saved")
         self.assertEqual(len(list(self.designs_dir.glob("*.pptx"))), 2)
 
-    def test_slidesgo_free_with_the_file_named_in_its_page_json_downloads_exactly(self):
-        url = "https://slidesgo.com/theme/abstract-art"
-        data = deck("Art")
-        self.site({url: httpx.Response(200, text=page("slidesgo_free_json.html"), headers=HTML),
-                   "https://storage.example-slides.test/sg/2020/abstract-art.pptx": httpx.Response(200, content=data, headers=PPTX)})
-        r = ti.import_link(url)
-        self.assertEqual((r["status"], r["name"]), ("saved", "Abstract Art"))
-        self.assertEqual((self.designs_dir / "Abstract Art.pptx").read_bytes(), data)  # an exact copy, straight from the CDN link in the page data
-        side = json.loads((self.designs_dir / "Abstract Art.pptx.source.json").read_text(encoding="utf-8"))
-        self.assertIn("Slidesgo", side["attribution"])
-        self.assertEqual(len(self.files()), 2)  # the .pptx and its source sidecar
-
-    def test_free_page_behind_a_signin_gate_says_what_is_missing_or_the_manual_way(self):
+    def test_slidesgo_free_never_goes_to_the_sign_in_download(self):
         url = "https://slidesgo.com/theme/abstract-art"
         self.site({url: httpx.Response(200, text=page("slidesgo_free.html"), headers=HTML),
                    url + "/download": httpx.Response(302, headers={"location": "https://slidesgo.com/auth/login"}),
                    "https://slidesgo.com/auth/login": httpx.Response(200, text="<form>Sign in</form>", headers=HTML)})
-        with mock.patch.object(ti, "rea_command", return_value=None), mock.patch.object(ti, "find_browsers", return_value=[]), \
-                mock.patch.object(ti.models, "vision_default", return_value="z-ai/glm-4.5v"):
+        with mock.patch("app.slidesgo.rea_image_urls", return_value=[]):
             r = ti.import_link(url)
-        self.assertEqual(r["status"], "missing")  # the page says free, so the build from its public previews is offered
-        self.assertIn("REA", r["message"])
-        self.assertIn("drop it into the Designs folder", r["message"])  # the manual way is named too
+        self.assertEqual(r["status"], "no_file")  # free, but this page lists no preview pictures to rebuild from
         self.assertEqual(self.files(), [])
-        self.assertTrue(all(m == "GET" for m, _ in self.seen))  # looked, never logged in or posted anything
+        self.assertEqual(self.seen, [("GET", url)])  # looked at the page only: no download, no login
 
     def test_a_gated_page_that_does_not_say_free_still_stops_with_the_signin_advice(self):
         url = "https://decks.example.test/theme/neon"
@@ -283,33 +268,6 @@ class VisionSpecTest(ImportTestCase):
             self.seen.append(json.loads(req.content))
             return httpx.Response(status, json={"choices": [{"message": {"content": content}}], "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
         ti.TRANSPORT = httpx.MockTransport(handler)
-
-    def test_slidesgo_free_with_a_gated_download_is_rebuilt_from_its_public_previews(self):
-        url = "https://slidesgo.com/theme/abstract-art"
-        spec = json.dumps({"background": "#ffffff", "palette": ["#1D3557"], "fonts": {"heading": "Montserrat", "body": "Lora"},
-                           "shapes": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 12, "fill": "#1D3557"}],
-                           "texts": [{"role": "title", "text": "Abstract Art", "x": 10, "y": 40, "w": 80, "h": 15, "size": 40, "color": "#1D3557"}]})
-        routes = {url: httpx.Response(200, text=page("slidesgo_free.html"), headers=HTML),
-                  url + "/download": httpx.Response(302, headers={"location": "https://slidesgo.com/auth/login"}),
-                  "https://slidesgo.com/auth/login": httpx.Response(200, text="<form>Sign in</form>", headers=HTML)}
-
-        def handler(req):
-            self.seen.append((req.method, str(req.url)))
-            u = str(req.url)
-            if "openrouter.ai" in u:
-                return httpx.Response(200, json={"choices": [{"message": {"content": spec}}],
-                                                 "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
-            return routes.get(u) or httpx.Response(404)
-        ti.TRANSPORT = httpx.MockTransport(handler)
-        with mock.patch.object(ti, "rea_command", return_value=["rea"]), mock.patch.object(ti, "find_browsers", return_value=["edge"]), \
-                mock.patch.object(ti, "rea_ready", return_value=True), mock.patch.object(ti, "capture_previews", return_value=[(png(), "image/png")]), \
-                mock.patch.object(ti, "vision_conn", return_value=("https://openrouter.ai/api/v1", "k", "z-ai/glm-4.5v")), mock.patch.object(ti.db, "log_usage"):
-            r = ti.import_link(url)
-        self.assertEqual((r["status"], r["name"]), ("rebuilt", "Abstract Art (rebuilt)"))
-        self.assertEqual([u for m, u in self.seen if m != "GET"], ["https://openrouter.ai/api/v1/chat/completions"])  # the only non-GET is the model call
-        side = json.loads((self.designs_dir / "Abstract Art (rebuilt).pptx.source.json").read_text(encoding="utf-8"))
-        self.assertIn("Slidesgo", side["attribution"])
-        self.assertIn("not an exact copy", side["note"])
 
     def test_read_slide_sends_the_picture_and_parses_fenced_json(self):
         self.llm("Here you go:\n```json\n" + json.dumps(self.SPEC) + "\n```")
