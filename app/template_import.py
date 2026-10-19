@@ -606,7 +606,7 @@ def vision_conn() -> tuple[str, str, str]:
 
 def read_slide(img: bytes, mime: str, n: int, total: int, conn: tuple[str, str, str]) -> dict:
     base, key, model = conn
-    body = {"model": model, "temperature": 0.1, "max_tokens": 4000,
+    body = {"model": model, "temperature": 0.1, "max_tokens": 8000,
             "messages": [{"role": "system", "content": SPEC_SYSTEM},
                          {"role": "user", "content": [{"type": "text", "text": f"Slide {n} of {total}. Return the JSON layout spec only."},
                                                       {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(img).decode()}"}}]}]}
@@ -619,6 +619,11 @@ def read_slide(img: bytes, mime: str, n: int, total: int, conn: tuple[str, str, 
                 r = h.post(base.rstrip("/") + "/chat/completions", json=body, headers={"authorization": f"Bearer {key}"})
         except httpx.HTTPError as e:
             raise Stop("error", f"The vision model couldn't be reached ({e.__class__.__name__}).")
+        if r.status_code == 429 or r.status_code >= 500:  # busy for a moment: once more, then this slide falls back to its picture
+            if attempt == 2:
+                raise Stop("busy", f"The vision model was busy ({r.status_code}).")
+            time.sleep(4)
+            continue
         if r.status_code >= 400:
             raise Stop("error", f"The vision model answered {r.status_code}: {r.text[:160]}")
         j = r.json()
@@ -632,6 +637,8 @@ def read_slide(img: bytes, mime: str, n: int, total: int, conn: tuple[str, str, 
         except ValueError:
             if attempt == 2:
                 raise
+            body["messages"].append({"role": "user", "content": "That wasn't valid JSON (maybe cut off). Answer again with the "
+                                     "complete JSON layout spec only: compact, no comments, no text around it."})
     raise ValueError("unreachable")
 
 
@@ -666,16 +673,21 @@ def rebuild_from_images(shots: list[tuple[bytes, str]], url: str, info: dict, co
         step(f"Reading slide {i} of {len(shots)} with {conn[2]}…")
         try:
             return read_slide(img, mime, i, len(shots), conn)
-        except ValueError:
-            return None
+        except (ValueError, Stop) as e:
+            if isinstance(e, Stop) and e.status != "busy":
+                raise
+            ext = {"image/jpeg": "jpeg", "image/png": "png"}.get(mime)  # keep the slide in its place: its preview as a picture
+            return {"background": "", "palette": [], "fonts": {"heading": "", "body": ""}, "texts": [], "shapes": [],
+                    "_image": (img, ext) if ext else None, "_fallback": True}
     if workers > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(workers) as ex:
-            specs = [x for x in ex.map(one, enumerate(shots, 1)) if x]
+            specs = list(ex.map(one, enumerate(shots, 1)))
     else:
-        specs = [x for x in map(one, enumerate(shots, 1)) if x]
-    if not specs:
+        specs = list(map(one, enumerate(shots, 1)))
+    if all(s.get("_fallback") for s in specs):
         raise Stop("error", "The vision model didn't return a usable layout for any preview.")
+    pictures = sum(1 for s in specs if s.get("_fallback"))
     sz = pptx_build.image_size(shots[0][0])
     step("Writing the PowerPoint…")
     deck = build_deck_spec(specs, info["title"] or "Template", sz)
@@ -683,7 +695,8 @@ def rebuild_from_images(shots: list[tuple[bytes, str]], url: str, info: dict, co
     data = pptx_build.build_from_spec(deck, info["title"], thumb)
     note = note or "Rebuilt by A.F.R.A from the preview pictures (similar layouts, colours and fonts; not an exact copy)."
     return save_design(data, (info["title"] or "Template") + " (rebuilt)", url, info["kind"], info, "rebuilt",
-                       {"note": note, "slides": len(specs), **(extra or {})})
+                       {"note": note + (f" {pictures} slide(s) kept as a picture of the preview, since they couldn't be rebuilt." if pictures else ""),
+                        "slides": len(specs), "pictures": pictures, **(extra or {})})
 
 
 # ---------------------------------------------------------------- several links in the background
