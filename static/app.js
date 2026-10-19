@@ -2073,6 +2073,7 @@ VIEWS.settings = async () => {
   const s = S.settings = await api("/api/settings");
   main().innerHTML = `<div class="page-head"><div><h1>Settings</h1><p>Stored locally in <code>data/settings.json</code>. Nothing leaves your computer except calls to the AI and search providers you choose.</p></div></div>
   <div class="card" style="margin-bottom:16px"><h3>How A.F.R.A uses AI</h3><div id="claudeBox" class="small muted">Checking…</div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Tugas folder</h3><p class="small muted" style="margin-top:0">Where the folders of the <a href="#tugas">Tugas</a> page live on this computer. Leave empty for <code>Documents/A.F.R.A Tugas</code>. Existing folders are not moved: copy them across yourself when you change this.</p><div class="row"><input type="text" id="s_tugas_dir" class="grow" value="${esc(s.tugas_dir || "")}" placeholder="e.g. D:/Kuliah/Tugas"><button class="btn primary" id="savetg">Save</button></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Google Slides and Drive</h3><p class="small muted" style="margin-top:0">Decks are made under <a href="#gslides">Slides</a>. Connect one or more Google accounts here or there.</p><div id="googleBox" class="small muted">Checking…</div></div>
@@ -2195,7 +2196,7 @@ VIEWS.settings = async () => {
   };
   const doSave = async (quiet) => { S.settings = await api("/api/settings", { method: "PUT", body: collect() }); renderLLMStatus(); if (quiet !== true) toast("Settings saved", "ok"); };
   $("#save1").onclick = async () => { await doSave(); loadModels(true); };
-  $("#save2").onclick = $("#save3").onclick = doSave;
+  $("#save2").onclick = $("#save3").onclick = $("#savetg").onclick = doSave;
   $("#test").onclick = (e) => busy(e.currentTarget, async () => {
     await doSave(true); $("#tres").textContent = "";
     try {
@@ -2350,6 +2351,231 @@ VIEWS.settings = async () => {
     if (prompt(`Type the project name to delete it permanently (library, documents, runs):\n${S.project.name}`) !== S.project.name) return;
     await api(`/api/projects/${S.project.id}`, { method: "DELETE" }); localStorage.removeItem("rt_project"); await loadProjects(); location.hash = "#home";
   };
+};
+
+// ------------------------------------------------------------------ Tugas: Finder-style folders on disk
+const T = { path: "", data: null, tree: null, upcoming: [], sel: new Set(), last: null, query: "", found: null,
+  mode: (() => { try { return localStorage.getItem("rt_tugas_mode") || "grid"; } catch { return "grid"; } })(),
+  open: (() => { try { return new Set(JSON.parse(localStorage.getItem("rt_tugas_open") || "[]")); } catch { return new Set(); } })() };
+const tgUrl = (p) => "#tugas" + (p ? "/" + p.split("/").map(encodeURIComponent).join("/") : "");
+const tgBase = (p) => p.split("/").pop();
+const tgParent = (p) => p.split("/").slice(0, -1).join("/");
+const tgSize = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(1)} GB`;
+const TG_KIND = { pptx: "pptx", ppt: "pptx", key: "pptx", docx: "docx", doc: "docx", odt: "docx", rtf: "docx", pdf: "pdf", png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image", bmp: "image" };
+const TG_LABEL = { pptx: "PPT", docx: "DOC", pdf: "PDF", image: "IMG", other: "FILE" };
+function tgIcon(it) {
+  if (it.kind === "folder") return `<svg class="tg-ico" viewBox="0 0 48 40"><path d="M3 8a3 3 0 0 1 3-3h12l4 5h20a3 3 0 0 1 3 3v21a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z" fill="var(--accent-2)" opacity=".9"/><path d="M3 15h42v18a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z" fill="var(--accent)"/></svg>`;
+  const k = TG_KIND[it.ext] || "other";
+  return `<div class="tg-ico tg-file ${k}"><b>${it.ext && k === "other" ? esc(it.ext.slice(0, 4).toUpperCase()) : TG_LABEL[k]}</b></div>`;
+}
+function tgDue(due) {
+  if (!due) return "";
+  const d = Math.round((Date.parse(due + "T00:00:00") - new Date().setHours(0, 0, 0, 0)) / 864e5);
+  const when = d < 0 ? `${-d} day${d === -1 ? "" : "s"} overdue` : d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`;
+  const date = new Date(due + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return `<span class="pill ${d < 0 ? "bad" : d <= 3 ? "warn" : "gray"}">Due ${date} · ${when}</span>`;
+}
+async function tgLoad(path = T.path, keepSel = false) {
+  const [data, tree, up] = await Promise.all([api("/api/tugas?path=" + encodeURIComponent(path)), api("/api/tugas/tree"), api("/api/tugas/upcoming")]);
+  Object.assign(T, { path: data.path, data, tree, upcoming: up });
+  T.sel = keepSel ? new Set([...T.sel].filter((p) => data.items.some((i) => i.path === p))) : new Set();
+  if (!keepSel) T.last = null;
+  tgRender();
+}
+function tgNode(n, depth) {
+  const kids = n.children || [], open = T.open.has(n.path) || (T.path + "/").startsWith(n.path + "/");
+  return `<div class="tg-node"><div class="tg-row ${n.path === T.path ? "on" : ""}" data-p="${esc(n.path)}" data-drop style="padding-left:${6 + depth * 14}px">
+    <span class="tg-caret ${kids.length ? "" : "none"}" data-toggle="${esc(n.path)}">${open ? "▾" : "▸"}</span><a href="${tgUrl(n.path)}">${esc(n.name)}</a></div>${open && kids.length ? kids.map((k) => tgNode(k, depth + 1)).join("") : ""}</div>`;
+}
+function tgItem(it) {
+  const isF = it.kind === "folder";
+  const meta = isF ? [it.due ? tgDue(it.due) : "", it.linked ? `<span class="pill">${it.linked} linked</span>` : ""].join("") : `<span class="muted">${tgSize(it.size)}</span>`;
+  return `<div class="tg-item ${T.sel.has(it.path) ? "sel" : ""}" draggable="true" data-p="${esc(it.path)}" ${isF ? "data-drop" : ""} title="${esc(it.note || it.name)}">
+    ${tgIcon(it)}<div class="tg-name"><span data-name>${esc(it.name)}</span></div><div class="tg-meta small">${meta}</div>
+    <div class="tg-date small muted">${new Date(it.modified * 1000).toLocaleDateString()}</div></div>`;
+}
+function tgRender() {
+  const d = T.data, items = d.items, atRoot = !T.path;
+  const links = d.links.map((l) => `<span class="pill tg-link"><a href="${l.type === "doc" ? "#docs/" + l.id : "#library"}">${l.type === "doc" ? "Doc" : "Paper"}: ${esc(l.title.slice(0, 60))}</a> <button data-unlink="${l.type}:${l.id}" title="Unlink">×</button></span>`).join(" ");
+  const info = !atRoot ? `<div class="tg-info"><div class="row">${tgDue(d.meta.due) || '<span class="muted small">No due date</span>'}
+      <button class="btn small ghost" data-act="meta">Due date &amp; note</button><button class="btn small ghost" data-act="link">Link doc or paper</button></div>
+      ${d.meta.note ? `<div class="small" style="margin-top:6px;white-space:pre-wrap">${esc(d.meta.note)}</div>` : ""}${links ? `<div class="row" style="margin-top:8px;gap:6px">${links}</div>` : ""}</div>` : "";
+  const soon = atRoot && !T.found && T.upcoming.length ? `<div class="tg-info"><b class="small">Coming up</b>${T.upcoming.slice(0, 6).map((u) => `<div class="tg-up"><a href="${tgUrl(u.path)}">${esc(u.path)}</a> ${tgDue(u.due)}</div>`).join("")}</div>` : "";
+  let body;
+  if (T.found) body = T.found.length ? `<div class="tg-found">${T.found.map((f) => `<div class="tg-hit" data-hit="${esc(f.path)}" data-kind="${f.kind}">${tgIcon(f)}<div><div>${esc(f.name)}</div><div class="small muted">${esc(f.parent || "All Tugas")}</div></div></div>`).join("")}</div>` : `<div class="empty">Nothing named “${esc(T.query)}”.</div>`;
+  else if (!items.length) body = `<div class="empty">${atRoot ? "No folders yet. Make one per mata kuliah, semester, or however you like." : "This folder is empty. Drop files here, or use Upload."}
+    <div class="row" style="justify-content:center;margin-top:12px"><button class="btn primary" data-act="mkdir">New folder</button>${atRoot ? "" : '<button class="btn" data-act="upload">Upload files</button>'}</div></div>`;
+  else body = `<div class="tg-grid ${T.mode}">${T.mode === "list" ? `<div class="tg-item head small muted"><span></span><span>Name</span><span>Info</span><span>Modified</span></div>` : ""}${items.map(tgItem).join("")}</div>`;
+  const crumbs = [`<a href="#tugas" data-p="" data-drop>All Tugas</a>`, ...d.crumbs.map((c) => `<a href="${tgUrl(c.path)}" data-p="${esc(c.path)}" data-drop>${esc(c.name)}</a>`)].join(" <span class='muted'>/</span> ");
+  main().innerHTML = `<div class="page-head"><div><h1>Tugas</h1><p>Folders for every assignment, kept on your computer in <code>${esc(d.root)}</code>. File Explorer and Finder see the same folders.</p></div>
+    <div class="row"><input type="text" id="tgq" placeholder="Search names…" value="${esc(T.query)}" style="width:190px"><button class="btn" data-act="mode" title="Switch grid and list">${T.mode === "grid" ? "List view" : "Grid view"}</button>
+    <button class="btn" data-act="upload">Upload</button><button class="btn primary" data-act="mkdir">New folder</button><input type="file" id="tgfile" multiple hidden></div></div>
+    <div class="tg"><div class="card tg-tree"><div class="tg-row ${!T.path ? "on" : ""}" data-p="" data-drop><span class="tg-caret none"></span><a href="#tugas"><b>All Tugas</b></a></div>${T.tree.children.map((n) => tgNode(n, 0)).join("")}</div>
+    <div class="card tg-main" data-p="${esc(T.path)}"><div class="tg-crumbs">${crumbs}</div>${info}${soon}${body}</div></div>`;
+  tgWire();
+}
+const tgSelected = () => [...T.sel];
+async function tgDo(fn, ok) {
+  try { const r = await fn(); await tgLoad(T.path, true); if (ok) toast(ok, "ok"); return r; } catch (e) { toast(e.message, "bad"); }
+}
+async function tgUpload(files, to = T.path) {
+  if (!files.length) return;
+  const fd = new FormData(); [...files].forEach((f) => fd.append("files", f, f.name));
+  toast(`Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
+  await tgDo(() => api("/api/tugas/upload?path=" + encodeURIComponent(to), { body: fd }), `Added ${files.length} file${files.length > 1 ? "s" : ""}`);
+}
+function tgNew() {
+  const box = modal(`<h2>New folder</h2><input type="text" id="tgn" placeholder="e.g. Fisika Dasar, Semester 5, Tugas 1" autofocus><div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Create</button></div>`);
+  const go = () => { const name = $("#tgn", box).value; closeModal(); tgDo(() => api("/api/tugas/mkdir", { body: { path: T.path, name } })); };
+  $("#tgx", box).onclick = closeModal; $("#tgok", box).onclick = go; $("#tgn", box).onkeydown = (e) => { if (e.key === "Enter") go(); };
+  setTimeout(() => $("#tgn", box)?.focus(), 30);
+}
+function tgRename(path) {
+  const el = $(`.tg-item[data-p="${CSS.escape(path)}"] [data-name]`); if (!el) return;
+  const old = tgBase(path), inp = document.createElement("input"); inp.type = "text"; inp.value = old; inp.className = "tg-edit";
+  el.replaceWith(inp); inp.focus(); inp.setSelectionRange(0, old.includes(".") ? old.lastIndexOf(".") : old.length);
+  let done = false;
+  const finish = (save) => { if (done) return; done = true; if (save && inp.value.trim() && inp.value !== old) tgDo(() => api("/api/tugas/rename", { body: { path, name: inp.value } })); else tgRender(); };
+  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") finish(true); else if (e.key === "Escape") finish(false); };
+  inp.onblur = () => finish(true); inp.onclick = inp.ondblclick = (e) => e.stopPropagation();
+}
+function tgTrash(paths) {
+  if (!paths.length) return;
+  const what = paths.length === 1 ? `“${tgBase(paths[0])}”` : `${paths.length} items`;
+  if (!confirm(`Move ${what} to the Recycle Bin?\n\nYou can restore ${paths.length === 1 ? "it" : "them"} from there.`)) return;
+  tgDo(() => api("/api/tugas/delete", { body: { paths } }), "Moved to the Recycle Bin");
+}
+async function tgMeta(path) {
+  const m = (await api("/api/tugas?path=" + encodeURIComponent(path))).meta;
+  const box = modal(`<h2>Due date &amp; note</h2><p class="small muted" style="margin-top:0">${esc(path)}</p><label class="f">Due date</label><input type="date" id="tgd" value="${esc(m.due)}">
+    <label class="f">Note</label><textarea id="tgt" placeholder="What it is, who it is for, anything to remember">${esc(m.note)}</textarea>
+    <div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Save</button></div>`);
+  $("#tgx", box).onclick = closeModal;
+  $("#tgok", box).onclick = () => { const due = $("#tgd", box).value, note = $("#tgt", box).value; closeModal(); tgDo(() => api("/api/tugas/meta", { method: "PUT", body: { path, due, note } }), "Saved"); };
+}
+async function tgLink(path) {
+  const m = (await api("/api/tugas?path=" + encodeURIComponent(path))).meta;
+  const [docs, papers] = await Promise.all([api(`/api/projects/${S.project.id}/documents?kind=doc`), api(`/api/projects/${S.project.id}/papers`)]);
+  const row = (t, id, title, on) => `<label class="tg-pick" data-t="${esc(title.toLowerCase())}"><input type="checkbox" data-${t}="${id}" ${on ? "checked" : ""}> <span>${esc(title)}</span></label>`;
+  const box = modal(`<h2>Link A.F.R.A items</h2><p class="small muted" style="margin-top:0">To <b>${esc(path)}</b>, from the project “${esc(S.project.name)}”.</p><input type="text" id="tgf" placeholder="Filter by title…">
+    <div class="scroll" style="max-height:48vh;margin-top:8px"><h3 class="small muted">Documents</h3>${docs.length ? docs.map((d) => row("doc", d.id, d.title, m.docs.includes(d.id))).join("") : '<div class="small muted">No documents in this project.</div>'}
+    <h3 class="small muted" style="margin-top:12px">Papers</h3>${papers.length ? papers.map((p) => row("paper", p.id, p.title || "Untitled", m.papers.includes(p.id))).join("") : '<div class="small muted">No papers in this project.</div>'}</div>
+    <div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Save</button></div>`);
+  $("#tgf", box).oninput = (e) => $$(".tg-pick", box).forEach((l) => l.style.display = l.dataset.t.includes(e.target.value.toLowerCase()) ? "" : "none");
+  $("#tgx", box).onclick = closeModal;
+  $("#tgok", box).onclick = () => {  // links to items of other projects stay as they were
+    const keep = (all, ids) => ids.filter((i) => !all.some((x) => x.id === i));
+    const body = { path, docs: [...keep(docs, m.docs), ...$$("[data-doc]:checked", box).map((x) => x.dataset.doc)], papers: [...keep(papers, m.papers), ...$$("[data-paper]:checked", box).map((x) => x.dataset.paper)] };
+    closeModal(); tgDo(() => api("/api/tugas/meta", { method: "PUT", body }), "Saved");
+  };
+}
+const tgOpen = (it) => it.kind === "folder" ? (location.hash = tgUrl(it.path)) : api("/api/tugas/open", { body: { path: it.path } }).catch((e) => toast(e.message, "bad"));
+function tgContext(e) {
+  e.preventDefault();
+  const el = e.target.closest(".tg-item[data-p]"), path = el?.dataset.p;
+  if (el && !T.sel.has(path)) { T.sel = new Set([path]); $$(".tg-item").forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p))); }
+  const sel = tgSelected(), one = el && sel.length === 1 ? T.data.items.find((i) => i.path === sel[0]) : null;
+  let list;
+  if (!el) list = [["mkdir", "New folder"], ["upload", "Upload files…"], ["-"], ["reveal", "Show this folder in File Explorer"]];
+  else if (!one) list = [["trash", "Move to Recycle Bin", "danger"]];
+  else list = [["open", "Open"], ["reveal", "Show in File Explorer"], ["rename", "Rename"], ...(one.kind === "folder" ? [["-"], ["meta", "Set due date / note"], ["link", "Link A.F.R.A document or paper"]] : []), ["-"], ["trash", "Move to Recycle Bin", "danger"]];
+  $$(".tg-menu").forEach((m) => m.remove());
+  const m = document.createElement("div"); m.className = "tg-menu";
+  m.innerHTML = list.map(([k, label, cls]) => k === "-" ? "<hr>" : `<button data-k="${k}" class="${cls || ""}">${label}</button>`).join("");
+  document.body.appendChild(m);
+  m.style.left = Math.max(4, Math.min(e.clientX, innerWidth - m.offsetWidth - 8)) + "px"; m.style.top = Math.max(4, Math.min(e.clientY, innerHeight - m.offsetHeight - 8)) + "px";
+  m.onclick = (ev) => {
+    const k = ev.target.dataset.k; if (!k) return; m.remove();
+    if (k === "mkdir") tgNew(); else if (k === "upload") $("#tgfile").click();
+    else if (k === "reveal") api("/api/tugas/reveal", { body: { path: one ? one.path : T.path } }).catch((x) => toast(x.message, "bad"));
+    else if (k === "open") tgOpen(one); else if (k === "rename") tgRename(one.path);
+    else if (k === "meta") tgMeta(one.path).catch((x) => toast(x.message, "bad")); else if (k === "link") tgLink(one.path).catch((x) => toast(x.message, "bad")); else if (k === "trash") tgTrash(sel);
+  };
+}
+function tgWire() {
+  const root = main(), pane = $(".tg-main");
+  $("#tgfile").onchange = (e) => { tgUpload(e.target.files); e.target.value = ""; };
+  $("#tgq").oninput = debounce(async (e) => {
+    T.query = e.target.value.trim(); T.found = T.query ? await api("/api/tugas/search?q=" + encodeURIComponent(T.query)).catch(() => []) : null;
+    tgRender(); const q = $("#tgq"); q.focus(); q.setSelectionRange(q.value.length, q.value.length);
+  }, 300);
+  $$("[data-act]", root).forEach((b) => b.onclick = () => {
+    const a = b.dataset.act;
+    if (a === "mkdir") tgNew(); else if (a === "upload") $("#tgfile").click();
+    else if (a === "mode") { T.mode = T.mode === "grid" ? "list" : "grid"; try { localStorage.setItem("rt_tugas_mode", T.mode); } catch { } tgRender(); }
+    else if (a === "meta") tgMeta(T.path).catch((x) => toast(x.message, "bad")); else if (a === "link") tgLink(T.path).catch((x) => toast(x.message, "bad"));
+  });
+  $$("[data-unlink]", root).forEach((b) => b.onclick = () => {
+    const [t, id] = b.dataset.unlink.split(":"), m = T.data.meta;
+    tgDo(() => api("/api/tugas/meta", { method: "PUT", body: { path: T.path, [t === "doc" ? "docs" : "papers"]: m[t === "doc" ? "docs" : "papers"].filter((x) => x !== id) } }), "Unlinked");
+  });
+  $$("[data-toggle]", root).forEach((c) => c.onclick = (e) => {
+    e.preventDefault(); e.stopPropagation(); const p = c.dataset.toggle;
+    if ((T.path + "/").startsWith(p + "/")) { location.hash = tgUrl(p); return; }  // collapsing a branch that holds the open folder: step up to it
+    T.open.has(p) ? T.open.delete(p) : T.open.add(p);
+    try { localStorage.setItem("rt_tugas_open", JSON.stringify([...T.open])); } catch { }
+    tgRender();
+  });
+  $$(".tg-hit", root).forEach((h) => h.onclick = () => { T.query = ""; T.found = null; const p = h.dataset.kind === "folder" ? h.dataset.hit : tgParent(h.dataset.hit); if (p === T.path) tgLoad(p); else location.hash = tgUrl(p); });
+  // selection, opening, context menu
+  $$(".tg-item[data-p]", root).forEach((el) => {
+    const it = T.data.items.find((i) => i.path === el.dataset.p);
+    el.onclick = (e) => {
+      if (e.target.tagName === "INPUT") return;
+      const p = el.dataset.p;
+      if (e.shiftKey && T.last) { const ps = T.data.items.map((i) => i.path), a = ps.indexOf(T.last), b = ps.indexOf(p); T.sel = new Set(ps.slice(Math.min(a, b), Math.max(a, b) + 1)); }
+      else if (e.ctrlKey || e.metaKey) { T.sel.has(p) ? T.sel.delete(p) : T.sel.add(p); T.last = p; }
+      else { T.sel = new Set([p]); T.last = p; }
+      $$(".tg-item", root).forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p)));
+    };
+    el.ondblclick = (e) => { if (e.target.tagName !== "INPUT") tgOpen(it); };
+    el.ondragstart = (e) => {
+      if (!T.sel.has(el.dataset.p)) { T.sel = new Set([el.dataset.p]); $$(".tg-item", root).forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p))); }
+      e.dataTransfer.setData("application/x-afra-tugas", JSON.stringify(tgSelected())); e.dataTransfer.effectAllowed = "move";
+    };
+  });
+  pane.oncontextmenu = tgContext;
+  // drag and drop: items onto folders (grid, tree, breadcrumb) and files from the desktop onto a folder or the page
+  const types = (e) => [...(e.dataTransfer?.types || [])];
+  const hasFiles = (e) => types(e).includes("Files"), isMine = (e) => types(e).includes("application/x-afra-tugas");
+  $$("[data-drop]", root).forEach((el) => {
+    el.ondragover = (e) => { if (isMine(e) || hasFiles(e)) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = isMine(e) ? "move" : "copy"; el.classList.add("drop"); } };
+    el.ondragleave = () => el.classList.remove("drop");
+    el.ondrop = (e) => {
+      e.preventDefault(); e.stopPropagation(); el.classList.remove("drop"); pane.classList.remove("drop");
+      const to = el.dataset.p;
+      if (isMine(e)) {
+        const paths = JSON.parse(e.dataTransfer.getData("application/x-afra-tugas")).filter((p) => p !== to && tgParent(p) !== to);
+        if (paths.length) tgDo(() => api("/api/tugas/move", { body: { paths, to } }), paths.length === 1 ? `Moved “${tgBase(paths[0])}”` : `Moved ${paths.length} items`);
+      } else if (hasFiles(e)) tgUpload(e.dataTransfer.files, to);
+    };
+  });
+  pane.ondragover = (e) => { if (hasFiles(e)) { e.preventDefault(); pane.classList.add("drop"); } };
+  pane.ondragleave = (e) => { if (!pane.contains(e.relatedTarget)) pane.classList.remove("drop"); };
+  pane.ondrop = (e) => { if (hasFiles(e)) { e.preventDefault(); pane.classList.remove("drop"); tgUpload(e.dataTransfer.files); } };
+  pane.onclick = (e) => { if (!e.target.closest(".tg-item, button, a, input, label")) { T.sel = new Set(); $$(".tg-item", root).forEach((x) => x.classList.remove("sel")); } };
+}
+if (!window.__tgKeys) {
+  window.__tgKeys = true;
+  document.addEventListener("keydown", (e) => {
+    if (S.view !== "tugas" || !T.data || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || !$("#modal").classList.contains("hidden")) return;
+    if (e.key === "F2" && T.sel.size === 1) { e.preventDefault(); tgRename([...T.sel][0]); }
+    else if (e.key === "Delete" && T.sel.size) { e.preventDefault(); tgTrash(tgSelected()); }
+    else if (e.key === "Enter" && T.sel.size === 1) { const it = T.data.items.find((i) => i.path === [...T.sel][0]); if (it) tgOpen(it); }
+    else if (e.key === "Backspace" && T.path) { e.preventDefault(); location.hash = tgUrl(tgParent(T.path)); }
+    else if (e.key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); T.sel = new Set(T.data.items.map((i) => i.path)); tgRender(); }
+  });
+  const closeMenus = () => $$(".tg-menu").forEach((m) => m.remove());
+  document.addEventListener("click", closeMenus); document.addEventListener("scroll", closeMenus, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+}
+VIEWS.tugas = async () => {
+  const path = location.hash.split("/").slice(1).map(decodeURIComponent).join("/");
+  T.query = ""; T.found = null;
+  try { await tgLoad(path); } catch (e) {
+    if (path) { toast(e.message, "bad"); location.hash = "#tugas"; return; }
+    main().innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
+  }
 };
 
 boot().catch((e) => { main().innerHTML = `<div class="notice bad">Failed to start: ${esc(e.message)}</div>`; });

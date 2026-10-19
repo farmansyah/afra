@@ -46,6 +46,7 @@ DEFAULTS = {
     "phone_pin": "",
     "phone_secret": "",
     "chat_url": "https://chat.farmansyah.cloud",  # the private chat (github.com/farmansyah/afra-chat), behind the heart
+    "tugas_dir": "",                   # root of the Tugas folders; empty = Documents/A.F.R.A Tugas
     "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
     "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }

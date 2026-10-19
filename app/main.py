@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
-from . import designs, google_api, gslides, pptx_build
+from . import designs, google_api, gslides, pptx_build, tugas
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -161,6 +161,11 @@ async def no_stale_frontend(request, call_next):
 @app.exception_handler(LLMError)
 async def llm_error(_, exc):
     return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.exception_handler(tugas.TugasError)
+async def tugas_error(_, exc):
+    return JSONResponse({"detail": str(exc)}, status_code=400)
 
 
 @app.exception_handler(ValueError)
@@ -1308,6 +1313,69 @@ def export_docx(body: dict):
     return Response(data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}.docx",
                              "X-Cited": str(info["cited"]), "X-Missing": quote(",".join(info["missing"]))})
+
+
+# ---------------------------------------------------------------- Tugas (folders on disk)
+@app.get("/api/tugas")
+def tugas_list(path: str = ""):
+    return tugas.list_dir(path)
+
+
+@app.get("/api/tugas/tree")
+def tugas_tree():
+    return tugas.tree()
+
+
+@app.get("/api/tugas/upcoming")
+def tugas_upcoming():
+    return tugas.upcoming()
+
+
+@app.get("/api/tugas/search")
+def tugas_search(q: str = ""):
+    return tugas.search(q)
+
+
+@app.post("/api/tugas/mkdir")
+def tugas_mkdir(body: dict):
+    return tugas.mkdir(body.get("path", ""), body.get("name"))
+
+
+@app.post("/api/tugas/rename")
+def tugas_rename(body: dict):
+    return tugas.rename(body.get("path", ""), body.get("name"))
+
+
+@app.post("/api/tugas/move")
+def tugas_move(body: dict):
+    return {"paths": tugas.move(body.get("paths") or [], body.get("to", ""))}
+
+
+@app.post("/api/tugas/delete")
+def tugas_delete(body: dict):
+    return {"deleted": tugas.delete(body.get("paths") or [])}
+
+
+@app.post("/api/tugas/upload")
+def tugas_upload(path: str = "", files: list[UploadFile] = File(...)):
+    return {"saved": [tugas.save_upload(path, f.filename, f.file) for f in files]}
+
+
+@app.post("/api/tugas/open")
+def tugas_open(body: dict):
+    tugas.open_item(body.get("path", ""))
+    return {"ok": True}
+
+
+@app.post("/api/tugas/reveal")
+def tugas_reveal(body: dict):
+    tugas.reveal(body.get("path", ""))
+    return {"ok": True}
+
+
+@app.put("/api/tugas/meta")
+def tugas_meta(body: dict):
+    return tugas.set_meta(body.get("path", ""), body.get("due"), body.get("note"), body.get("docs"), body.get("papers"))
 
 
 # ---------------------------------------------------------------- frontend
