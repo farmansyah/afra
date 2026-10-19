@@ -7,10 +7,18 @@ Kinds: builtin (A.F.R.A's own), web (a template page such as Slidesgo: its previ
 pptx (an uploaded PowerPoint), slides (a Google Slides link), colors (made from colours and fonts). Every design has
 a palette, so both engines can use every design; the Google engine also uses the real layouts of pptx and slides
 designs. The Google copy made for each account is remembered in the record ("google": {email: {...}}).
-Template pages are read like a browser would show them, once, without logging in or downloading the template files.
+Template pages are read like a browser would show them, once, without logging in or downloading the template files
+(template_import.py does fetch a template's own free .pptx, never behind a login or paywall).
+
+The Designs folder (setting designs_dir, default <Tugas folder>/_Designs) holds .pptx files that are designs too: every
+one in it, subfolders included, is listed automatically (kind "pptx", id "fd...", name from the file name). Their theme and
+picture are cached in data/design_thumbs/, keyed by path + modified time + size, so a changed or removed file refreshes
+or drops out on the next list. Office lock files (~$*.pptx) are ignored.
 """
+import hashlib
 import io
 import json
+import os
 import re
 import secrets
 import threading
@@ -23,10 +31,12 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
-from .config import DATA_DIR
+from . import tugas
+from .config import DATA_DIR, get_settings
 
 FILE = DATA_DIR / "designs.json"
 DIR = DATA_DIR / "designs"
+THUMBS = DATA_DIR / "design_thumbs"
 TRANSPORT = None  # tests put an httpx.MockTransport here
 THEME = {"name": "A.F.R.A Navy", "dark": "#14213D", "light": "#FFFFFF", "accent": "#FFC857", "accent2": "#3C7DC4",
          "text": "#1F2A44", "muted": "#6B7280", "heading_font": "Georgia", "body_font": "Arial"}
@@ -85,19 +95,23 @@ def _public(r: dict) -> dict:
     out = {k: v for k, v in r.items() if k != "google"}
     out["theme"] = theme(r)
     out["accounts"] = sorted((r.get("google") or {}).keys())
-    out["has_pptx"] = (DIR / f"{r['id']}.pptx").exists()
+    out["has_pptx"] = (DIR / f"{r['id']}.pptx").exists() or bool(r.get("folder_path") and Path(r["folder_path"]).is_file())
+    out["in_folder"] = bool(r.get("folder_path"))
     return out
 
 
 def all_designs() -> list[dict]:
     with _LOCK:
         rows = _rows()
-    return [_public(r) for r in sorted(rows, key=lambda r: (not r.get("default"), r.get("kind") != "builtin", r.get("added", 0)))]
+    mine = [_public(r) for r in sorted(rows, key=lambda r: (not r.get("default"), r.get("kind") != "builtin", r.get("added", 0)))]
+    return mine + [_public(r) for r in sorted(folder_designs(rows), key=lambda r: r["name"].lower())]
 
 
 def get(did: str) -> dict:
     with _LOCK:
         r = next((r for r in _rows() if r["id"] == did), None)
+    if not r and did.startswith("fd"):
+        r = next((x for x in folder_designs() if x["id"] == did), None)
     if not r:
         raise ValueError("That design no longer exists.")
     return r
@@ -154,6 +168,10 @@ def delete(did: str) -> dict:
         _save(rows)
     for f in DIR.glob(f"{did}.*") if DIR.exists() else []:
         f.unlink(missing_ok=True)
+    fp = Path(r["folder_path"]) if r.get("folder_path") else None
+    if fp and fp.is_file() and _in_folder(fp):  # a design from the Designs folder: its file goes to the Recycle Bin
+        from send2trash import send2trash
+        send2trash(str(fp))
     return r
 
 
@@ -271,6 +289,114 @@ def pptx_theme(data: bytes) -> dict:
             "thumbnail": (thumb.rsplit(".", 1)[1].lower(), z.read(thumb)) if thumb else None}
 
 
+# ---------------------------------------------------------------- the Designs folder
+def folder() -> Path:
+    """The Designs folder, made on first use."""
+    custom = (get_settings().get("designs_dir") or "").strip()
+    p = Path(custom).expanduser() if custom else tugas.root() / "_Designs"
+    p.mkdir(parents=True, exist_ok=True)
+    return p.resolve()
+
+
+def _in_folder(p: Path) -> bool:
+    try:
+        return folder() in p.resolve().parents
+    except OSError:
+        return False
+
+
+def _key(p: Path) -> str:
+    """Cache key of a design file: where it is, when it changed, how big it is."""
+    st = p.stat()
+    return hashlib.sha1(f"{p}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")).hexdigest()[:20]
+
+
+def _folder_info(p: Path) -> dict | None:
+    key = _key(p)
+    f = THUMBS / f"{key}.json"
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    try:
+        t = pptx_theme(p.read_bytes())
+    except (OSError, ValueError, ET.ParseError, KeyError):  # being saved by PowerPoint right now, or not a real .pptx
+        return None
+    thumb = t.pop("thumbnail")
+    info = {**t, "thumb": ""}
+    THUMBS.mkdir(parents=True, exist_ok=True)
+    if thumb and thumb[0] in ("jpeg", "jpg", "png"):
+        info["thumb"] = "png" if thumb[0] == "png" else "jpg"
+        (THUMBS / f"{key}.{info['thumb']}").write_bytes(thumb[1])
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(info), encoding="utf-8")
+    tmp.replace(f)
+    return info
+
+
+def folder_files() -> list[Path]:
+    out = []
+    for dirpath, dirs, files in os.walk(folder()):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        out += [Path(dirpath, n) for n in sorted(files) if n.lower().endswith(".pptx") and not n.startswith(("~$", "."))]
+    return out
+
+
+def folder_designs(rows: list[dict] | None = None) -> list[dict]:
+    """A record for every .pptx in the Designs folder that is not already a saved design."""
+    with _LOCK:
+        rows = _rows() if rows is None else rows
+    taken = {r["folder_path"] for r in rows if r.get("folder_path")}
+    base = folder()
+    out, live = [], set()
+    for p in folder_files():
+        try:
+            live.add(_key(p))
+            if str(p) in taken:
+                continue
+            info = _folder_info(p)
+            if not info:
+                continue
+            rid = "fd" + hashlib.sha1(p.relative_to(base).as_posix().lower().encode("utf-8")).hexdigest()[:10]
+            t = {k: v for k, v in info.items() if k not in ("layouts", "size", "slides", "thumb")}
+            out.append({"id": rid, "name": p.stem[:120], "kind": "pptx", "theme": t, "layouts": [x for x in info["layouts"] if x],
+                        "slide_size": info["size"], "slides": info["slides"], "source": "Designs folder", "source_url": "",
+                        "default": False, "added": p.stat().st_mtime, "folder_path": str(p)})
+        except OSError:
+            continue
+    if THUMBS.exists():  # forget the cache of files that changed or are gone
+        for f in THUMBS.iterdir():
+            if f.stem not in live:
+                f.unlink(missing_ok=True)
+    return out
+
+
+def folder_status() -> dict:
+    return {"path": str(folder()), "count": len(folder_files())}
+
+
+def save_to_folder(data: bytes, filename: str) -> Path:
+    """Put a .pptx into the Designs folder ("name (2)" when taken)."""
+    name = tugas.clean_name(Path(str(filename or "Design")).name)
+    if not name.lower().endswith(".pptx"):
+        name = Path(name).stem + ".pptx"
+    target = tugas.unique(folder(), name)
+    target.write_bytes(data)
+    return target
+
+
+def folder_thumb(rec: dict) -> tuple[bytes, str] | None:
+    p = Path(rec.get("folder_path") or "")
+    if not p.is_file():
+        return None
+    info = _folder_info(p)
+    if info and info.get("thumb"):
+        f = THUMBS / f"{_key(p)}.{info['thumb']}"
+        if f.exists():
+            return f.read_bytes(), "image/png" if info["thumb"] == "png" else "image/jpeg"
+    return None
+
+
 def add_pptx(data: bytes, filename: str) -> dict:
     t = pptx_theme(data)
     thumb = t.pop("thumbnail")
@@ -279,6 +405,10 @@ def add_pptx(data: bytes, filename: str) -> dict:
            "slide_size": size, "slides": count, "source": "uploaded " + (filename or ".pptx"), "source_url": "", "default": False, "added": time.time()}
     DIR.mkdir(parents=True, exist_ok=True)
     (DIR / f"{rec['id']}.pptx").write_bytes(data)
+    try:  # the Designs folder keeps a copy people can see and open; the record points at it so the folder scan skips it
+        rec["folder_path"] = str(save_to_folder(data, filename or "Design.pptx"))
+    except OSError:
+        pass
     if thumb and thumb[0] in ("jpeg", "jpg", "png"):
         (DIR / f"{rec['id']}.{'png' if thumb[0] == 'png' else 'jpg'}").write_bytes(thumb[1])
     put(rec)
@@ -287,7 +417,13 @@ def add_pptx(data: bytes, filename: str) -> dict:
 
 def pptx_bytes(did: str) -> bytes | None:
     f = DIR / f"{did}.pptx"
-    return f.read_bytes() if f.exists() else None
+    if f.exists():
+        return f.read_bytes()
+    try:
+        fp = Path(get(did).get("folder_path") or "")
+    except ValueError:
+        return None
+    return fp.read_bytes() if fp.is_file() else None
 
 
 # ---------------------------------------------------------------- Google Slides decks (the dict the Slides API returns)
@@ -413,7 +549,8 @@ def thumb(did: str) -> tuple[bytes, str]:
         f = DIR / f"{did}.{ext}"
         if f.exists():
             return f.read_bytes(), mime
-    return swatch(theme(get(did)), get(did)["name"]).encode(), "image/svg+xml"
+    rec = get(did)
+    return folder_thumb(rec) or (swatch(theme(rec), rec["name"]).encode(), "image/svg+xml")
 
 
 def swatch(t: dict, name: str = "") -> str:

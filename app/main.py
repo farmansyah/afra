@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
-from . import designs, google_api, gslides, pptx_build, tugas
+from . import designs, google_api, gslides, pptx_build, template_import, tugas, tugas_decks
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -1154,6 +1154,29 @@ async def designs_add(body: dict):
     return await asyncio.to_thread(gslides.add_designs, body.get("links", ""), body.get("account") or None)
 
 
+@app.get("/api/designs/folder")
+def designs_folder():
+    return designs.folder_status()
+
+
+@app.post("/api/designs/folder/open")
+def designs_folder_open():
+    tugas.launch(designs.folder())
+    return {"ok": True}
+
+
+@app.post("/api/designs/import")
+def designs_import(body: dict):
+    """Links to free templates (Slidesgo, SlidesCarnival, Microsoft, Google Slides...), saved into the Designs folder.
+    Returns a job; GET /api/designs/import/{job} says what happened to each link."""
+    return template_import.start(body.get("links", ""))
+
+
+@app.get("/api/designs/import/{jid}")
+def designs_import_job(jid: str):
+    return template_import.job(jid)
+
+
 @app.post("/api/designs/pptx")
 async def designs_add_pptx(file: UploadFile = File(...)):
     data = await file.read()
@@ -1371,6 +1394,42 @@ def tugas_open(body: dict):
 def tugas_reveal(body: dict):
     tugas.reveal(body.get("path", ""))
     return {"ok": True}
+
+
+@app.post("/api/tugas/deck")
+def tugas_deck(body: dict):
+    """A new deck from a design, saved into a Tugas folder. source: {"type": "blank"} or {"type": "doc", "id": ...};
+    slides: already written slides (from /api/decks/outline + /api/decks/content), which skips the AI here. Returns a job."""
+    return tugas_decks.start(body.get("path", ""), body.get("design_id", ""), body.get("title", ""), body.get("source"), body.get("slides"))
+
+
+@app.get("/api/tugas/deck/jobs/{jid}")
+def tugas_deck_job(jid: str):
+    return tugas_decks.job(jid)
+
+
+def _tugas_pptx(path) -> Path:
+    p = tugas.resolve(path)
+    if not p.is_file() or p.suffix.lower() != ".pptx":
+        raise tugas.TugasError("Pick a PowerPoint (.pptx) file.")
+    return p
+
+
+@app.post("/api/tugas/use-as-design")
+def tugas_use_as_design(body: dict):
+    p = _tugas_pptx(body.get("path", ""))
+    data = p.read_bytes()
+    designs.pptx_theme(data)  # a real PowerPoint with a theme, or a plain message
+    return {"name": designs.save_to_folder(data, p.name).stem}
+
+
+@app.post("/api/tugas/google-slides")
+async def tugas_google_slides(body: dict):
+    """Upload a .pptx of the Tugas folders to "A.F.R.A Decks" and convert it to Google Slides."""
+    p = _tugas_pptx(body.get("path", ""))
+    if not google_api.accounts():
+        raise ValueError("Connect a Google account first: Settings › Google.")
+    return await asyncio.to_thread(gslides.pptx_to_slides, "", p.read_bytes(), p.name, body.get("account") or None)
 
 
 @app.put("/api/tugas/meta")

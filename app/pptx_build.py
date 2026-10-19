@@ -49,12 +49,14 @@ class Slide:
         self.n += 1
         return self.n
 
-    def rect(self, x0, y0, w, h, fill, line=""):
+    def rect(self, x0, y0, w, h, fill, line="", prst="rect", solid_line=False):
         i = self._id()
-        ln = f'<a:ln w="9525"><a:solidFill><a:srgbClr val="{c(line)}"/></a:solidFill><a:prstDash val="dash"/></a:ln>' if line else "<a:ln><a:noFill/></a:ln>"
+        dash = "" if solid_line else '<a:prstDash val="dash"/>'
+        ln = f'<a:ln w="9525"><a:solidFill><a:srgbClr val="{c(line)}"/></a:solidFill>{dash}</a:ln>' if line else "<a:ln><a:noFill/></a:ln>"
+        fill_xml = f'<a:solidFill><a:srgbClr val="{c(fill)}"/></a:solidFill>' if fill else "<a:noFill/>"
         self.parts.append(f'<p:sp><p:nvSpPr><p:cNvPr id="{i}" name="Shape {i}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>'
-                          f'<a:xfrm><a:off x="{e(x0)}" y="{e(y0)}"/><a:ext cx="{e(w)}" cy="{e(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-                          f'<a:solidFill><a:srgbClr val="{c(fill)}"/></a:solidFill>{ln}</p:spPr></p:sp>')
+                          f'<a:xfrm><a:off x="{e(x0)}" y="{e(y0)}"/><a:ext cx="{e(w)}" cy="{e(h)}"/></a:xfrm><a:prstGeom prst="{x(prst)}"><a:avLst/></a:prstGeom>'
+                          f'{fill_xml}{ln}</p:spPr></p:sp>')
 
     def text(self, x0, y0, w, h, paras, anchor="t", name="Text"):
         """paras: [(text, {size, bold, color, font, bullet, align, space})]"""
@@ -236,18 +238,22 @@ def _rels(items) -> str:
         for i, t, tg in items) + "</Relationships>"
 
 
-def build_pptx(slides: list[dict], t: dict, title: str = "", images: dict | None = None) -> tuple[bytes, list[dict]]:
-    """slides (content JSON after fit_slides) -> (.pptx bytes, flags). images: url -> (bytes, "png"|"jpeg")."""
+def build_pptx(slides: list[dict], t: dict, title: str = "", images: dict | None = None, size: tuple[float, float] | None = None,
+               renderer=None, thumbnail: tuple[bytes, str] | None = None) -> tuple[bytes, list[dict]]:
+    """slides (content JSON after fit_slides) -> (.pptx bytes, flags). images: url -> (bytes, "png"|"jpeg").
+    size (points) and renderer(slide, theme, number, images) -> (Slide, notes) let template_import write rebuilt designs."""
     import io
     import zipfile
     t = {**designs.THEME, **(t or {})}
+    renderer = renderer or render
+    sw, sh = size or (W, H)
     files, flags = {}, []
     exts = set()
     sld_ids, pres_rels = [], [("rId1", "slideMaster", "slideMasters/slideMaster1.xml"), ("rId2", "theme", "theme/theme1.xml"),
                               ("rId3", "notesMaster", "notesMasters/notesMaster1.xml"), ("rId4", "presProps", "presProps.xml"),
                               ("rId5", "viewProps", "viewProps.xml"), ("rId6", "tableStyles", "tableStyles.xml")]
     for n, s in enumerate(slides, 1):
-        sl, notes = render(s, t, n, images or {})
+        sl, notes = renderer(s, t, n, images or {})
         flags += [{"slide": n, "issue": m} for m in notes]
         files[f"ppt/slides/slide{n}.xml"] = sl.xml()
         rels = [("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rId2", "notesSlide", f"../notesSlides/notesSlide{n}.xml")]
@@ -270,7 +276,7 @@ def build_pptx(slides: list[dict], t: dict, title: str = "", images: dict | None
         pres_rels.append((f"rId{100 + n}", "slide", f"slides/slide{n}.xml"))
     files["ppt/presentation.xml"] = (XMLH + f'<p:presentation {NSDECL} saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'
                                      f'<p:notesMasterIdLst><p:notesMasterId r:id="rId3"/></p:notesMasterIdLst><p:sldIdLst>{"".join(sld_ids)}</p:sldIdLst>'
-                                     f'<p:sldSz cx="{e(W)}" cy="{e(H)}"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>')
+                                     f'<p:sldSz cx="{e(sw)}" cy="{e(sh)}"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>')
     files["ppt/_rels/presentation.xml.rels"] = _rels(pres_rels)
     files["ppt/slideMasters/slideMaster1.xml"] = (XMLH + f'<p:sldMaster {NSDECL}><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>'
                                                   + TREE.format("") + f'</p:cSld>{CLRMAP}<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst></p:sldMaster>')
@@ -295,9 +301,15 @@ def build_pptx(slides: list[dict], t: dict, title: str = "", images: dict | None
                                   f'<dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified></cp:coreProperties>')
     files["docProps/app.xml"] = (XMLH + '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
                                  f'<Application>A.F.R.A</Application><Slides>{len(slides)}</Slides></Properties>')
-    files["_rels/.rels"] = _rels([("rId1", "officeDocument", "ppt/presentation.xml"),
-                                  ("rId2", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", "docProps/core.xml"),
-                                  ("rId3", "extended-properties", "docProps/app.xml")])
+    root_rels = [("rId1", "officeDocument", "ppt/presentation.xml"),
+                 ("rId2", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", "docProps/core.xml"),
+                 ("rId3", "extended-properties", "docProps/app.xml")]
+    if thumbnail:  # the picture the Designs folder shows for this file
+        ext = "jpeg" if thumbnail[1] in ("jpg", "jpeg") else "png"
+        exts.add(ext)
+        files[f"docProps/thumbnail.{ext}"] = thumbnail[0]
+        root_rels.append(("rId4", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail", f"docProps/thumbnail.{ext}"))
+    files["_rels/.rels"] = _rels(root_rels)
     over = [("/ppt/presentation.xml", f"{CT}.presentation.main+xml"), ("/ppt/slideMasters/slideMaster1.xml", f"{CT}.slideMaster+xml"),
             ("/ppt/slideLayouts/slideLayout1.xml", f"{CT}.slideLayout+xml"), ("/ppt/notesMasters/notesMaster1.xml", f"{CT}.notesMaster+xml"),
             ("/ppt/theme/theme1.xml", "application/vnd.openxmlformats-officedocument.theme+xml"),
@@ -319,6 +331,39 @@ def build_pptx(slides: list[dict], t: dict, title: str = "", images: dict | None
         for name, data in files.items():
             z.writestr(name, data)
     return buf.getvalue(), flags
+
+
+# ---------------------------------------------------------------- slides from a layout spec (template_import)
+ANCHOR = {"top": "t", "middle": "ctr", "bottom": "b"}
+ALIGN = {"left": "l", "center": "ctr", "right": "r"}
+PRST = {"rect": "rect", "ellipse": "ellipse", "round_rect": "roundRect", "triangle": "triangle", "line": "rect"}
+
+
+def render_spec(s: dict, t: dict, number: int, images: dict) -> tuple[Slide, list[str]]:
+    """One slide of a validated layout spec (see template_import.validate_spec): shapes, then real text boxes.
+    Positions in the spec are percentages of the slide, so any slide size works."""
+    sw, sh = s["_size"]
+    sl = Slide(s.get("background") or t["light"])
+    for sh_ in s.get("shapes") or []:
+        w, h = sh_["w"] * sw / 100, sh_["h"] * sh / 100
+        if sh_["type"] == "line":
+            w, h = (max(w, 0.75), max(h, 0.75))
+        sl.rect(sh_["x"] * sw / 100, sh_["y"] * sh / 100, w, h, sh_.get("fill"), sh_.get("line") or "", PRST.get(sh_["type"], "rect"), solid_line=True)
+    for tx in s.get("texts") or []:
+        font = tx.get("font") or (t["heading_font"] if tx.get("role") in ("title", "subtitle") else t["body_font"])
+        style = {"size": tx["size"], "bold": tx.get("bold"), "color": tx["color"], "font": font, "align": ALIGN.get(tx.get("align"), "l")}
+        lines = [ln for ln in str(tx["text"]).split("\n")] or [""]
+        sl.text(tx["x"] * sw / 100, tx["y"] * sh / 100, tx["w"] * sw / 100, tx["h"] * sh / 100, [(ln, style) for ln in lines],
+                anchor=ANCHOR.get(tx.get("anchor"), "t"), name=(tx.get("role") or "text").title())
+    return sl, []
+
+
+def build_from_spec(deck: dict, title: str = "", thumbnail: tuple[bytes, str] | None = None) -> bytes:
+    """A validated deck spec (size in points, theme, slides) -> an editable .pptx with real text boxes."""
+    size = tuple(deck["size"])
+    slides = [{**sl, "_size": size} for sl in deck["slides"]]
+    data, _ = build_pptx(slides, deck["theme"], title, None, size=size, renderer=render_spec, thumbnail=thumbnail)
+    return data
 
 
 def fetch_images(slides: list[dict]) -> dict:

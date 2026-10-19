@@ -1,7 +1,9 @@
 """The design gallery: built-ins, saved designs, PowerPoint themes, template pages (a saved HTML fixture, no network)."""
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import httpx
 
@@ -15,6 +17,12 @@ class DesignLibraryTest(unittest.TestCase):
     def setUp(self):
         designs.FILE.unlink(missing_ok=True)
         shutil.rmtree(designs.DIR, ignore_errors=True)
+        self.tmp = Path(tempfile.mkdtemp())  # uploads are also saved into the Designs folder: keep it out of the real one
+        for p in (mock.patch.object(designs, "get_settings", return_value={"designs_dir": str(self.tmp / "Designs")}),
+                  mock.patch.object(designs, "THUMBS", self.tmp / "thumbs")):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def tearDown(self):
         designs.TRANSPORT = None
@@ -56,6 +64,8 @@ class DesignLibraryTest(unittest.TestCase):
         d = designs.add_pptx(data, "Lab template.pptx")
         self.assertEqual((d["name"], d["kind"], d["has_pptx"]), ("Lab template", "pptx", True))
         self.assertEqual(designs.pptx_bytes(d["id"]), data)
+        self.assertEqual((self.tmp / "Designs" / "Lab template.pptx").read_bytes(), data)  # also saved in the Designs folder
+        self.assertEqual([r["name"] for r in designs.all_designs() if r["kind"] == "pptx"], ["Lab template"])  # and listed once
         with self.assertRaises(ValueError):
             designs.pptx_theme(b"not a zip")
 

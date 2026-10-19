@@ -47,6 +47,8 @@ DEFAULTS = {
     "phone_secret": "",
     "chat_url": "https://chat.farmansyah.cloud",  # the private chat (github.com/farmansyah/afra-chat), behind the heart
     "tugas_dir": "",                   # root of the Tugas folders; empty = Documents/A.F.R.A Tugas
+    "designs_dir": "",                 # folder of .pptx designs; empty = <Tugas folder>/_Designs
+    "template_vision_model": "z-ai/glm-4.5v",  # reads template previews when a link has no free .pptx (needs an OpenRouter key)
     "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
     "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }

@@ -296,12 +296,27 @@ def save_upload(path, name, fileobj) -> str:
     return rel(target.resolve())
 
 
+def save_bytes(path, name, data: bytes) -> str:
+    """Write a file made by A.F.R.A into a folder ("name (2)" when taken); returns its path relative to the root."""
+    folder = resolve(path)
+    if not folder.is_dir():
+        raise TugasError("That folder doesn't exist.")
+    target = unique(folder, clean_name(name))
+    target.write_bytes(data)
+    return rel(target.resolve())
+
+
 def open_item(path) -> None:
     p = resolve(path)
     if not p.exists():
         raise TugasError("That doesn't exist any more.")
     if p.is_file() and p.suffix.lower() in PROGRAMS:
         raise TugasError("A.F.R.A won't launch programs. Use Show in File Explorer instead.")
+    launch(p)
+
+
+def launch(p: Path) -> None:
+    """Open a file or folder in the computer's default app (callers have checked the path)."""
     if sys.platform == "win32":
         os.startfile(str(p))
     elif sys.platform == "darwin":

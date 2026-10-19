@@ -1747,7 +1747,7 @@ function gsCard(d, pick) {
     <img src="/api/designs/${encodeURIComponent(d.id)}/thumb?v=${Math.round(d.added || 0)}" alt="" loading="lazy">
     <div class="dmeta"><div class="t">${esc(d.name)} ${d.default ? `<span class="pill ok">default</span>` : ""}</div>
       <div class="sw">${gsSwatch(t)}</div>
-      <div class="small muted">${esc(GKIND[d.kind] || d.kind)} · ${esc(t.heading_font || "")}${t.body_font && t.body_font !== t.heading_font ? " / " + esc(t.body_font) : ""}</div>
+      <div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)} · ${esc(t.heading_font || "")}${t.body_font && t.body_font !== t.heading_font ? " / " + esc(t.body_font) : ""}</div>
       ${pick ? "" : `<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px">
         <button class="btn small ghost" data-dren="${esc(d.id)}">Rename</button>${d.default ? "" : `<button class="btn small ghost" data-ddef="${esc(d.id)}">Make default</button>`}
         ${d.source_url ? `<a class="btn small ghost" href="${esc(d.source_url)}" target="_blank">Source</a>` : ""}<button class="btn small ghost" data-ddel="${esc(d.id)}">Delete</button></div>`}</div></div>`;
@@ -1960,13 +1960,73 @@ async function gsNew(el) {
   });
 }
 
+// ---- the design picker and the template-link importer. Used by the Designs page and Tugas › New deck; the deck wizard can call them too.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const IMP_OK = new Set(["saved", "rebuilt", "added"]);
+const impShort = (u) => u.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60);
+function impRows(j) {
+  return j.items.map((i) => {
+    const tag = i.state === "done" ? (IMP_OK.has(i.status) ? `<span class="pill ok">${i.status === "rebuilt" ? "Rebuilt" : "Added"}</span>` : `<span class="pill warn">Not imported</span>`)
+      : i.state === "working" ? `<span class="spin"></span>` : `<span class="pill gray">Waiting</span>`;
+    return `<div class="tg-info small" style="margin:4px 0;padding:6px 10px">${tag} <b>${esc(i.name || impShort(i.url))}</b> <span class="muted">${esc(i.step || i.message || "")}</span></div>`;
+  }).join("");
+}
+async function designImport(text, out) {  // links (one per line) -> the Designs folder; shows one line per link while it works
+  const { job } = await api("/api/designs/import", { body: { links: text } });
+  for (; ;) {
+    const j = await api("/api/designs/import/" + job);
+    out.innerHTML = impRows(j);
+    if (j.state === "done") return j;
+    await sleep(1200);
+  }
+}
+function pdCard(d, sel) {
+  return `<div class="dcard${sel ? " sel" : ""}" data-did="${esc(d.id)}" title="${esc(d.name)}"><img src="/api/designs/${encodeURIComponent(d.id)}/thumb?v=${Math.round(d.added || 0)}" alt="" loading="lazy">
+    <div class="dmeta"><div class="t">${esc(d.name)}</div><div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)}</div></div></div>`;
+}
+// pickDesign({selected, title, button}) -> Promise of the chosen design (the /api/designs record), or null when cancelled
+function pickDesign(opts = {}) {
+  return new Promise((resolve) => {
+    let list = [], chosen = opts.selected || "", done = false;
+    const finish = (v) => { if (done) return; done = true; closeModal(); resolve(v); };
+    const box = modal(`<h2>${esc(opts.title || "Pick a design")}</h2><input type="text" id="pdq" placeholder="Filter designs…">
+      <div class="scroll" style="max-height:44vh;margin-top:8px"><div class="dgal small-gal" id="pdgal"><div class="small muted">Loading…</div></div></div>
+      <details style="margin-top:10px"><summary class="small">Add free templates from links</summary>
+        <textarea id="pdlinks" rows="3" placeholder="One link per line: Slidesgo, SlidesCarnival, Microsoft templates, a public Google Slides deck" style="margin-top:6px"></textarea>
+        <div class="row" style="margin-top:6px"><button class="btn small" id="pdadd">Add</button></div><div id="pdres" style="margin-top:6px"></div></details>
+      <div class="modal-foot"><button class="btn" id="pdx">Cancel</button><button class="btn primary" id="pdok">${esc(opts.button || "Use this design")}</button></div>`, true);
+    const paint = () => {
+      const q = $("#pdq", box).value.toLowerCase();
+      $("#pdgal", box).innerHTML = list.filter((d) => d.name.toLowerCase().includes(q)).map((d) => pdCard(d, d.id === chosen)).join("") || '<div class="small muted">No design matches.</div>';
+      $$(".dcard", box).forEach((c) => { c.onclick = () => { chosen = c.dataset.did; paint(); }; c.ondblclick = () => finish(list.find((d) => d.id === chosen)); });
+    };
+    const load = async () => {
+      list = (await api("/api/designs")).designs;
+      if (!list.some((d) => d.id === chosen)) chosen = (list.find((d) => d.default) || list[0] || {}).id || "";
+      paint();
+    };
+    load().catch((e) => { toast(e.message, "bad"); finish(null); });
+    $("#pdq", box).oninput = paint;
+    $("#pdx", box).onclick = () => finish(null);
+    $("#pdok", box).onclick = () => finish(list.find((d) => d.id === chosen) || null);
+    $("#pdadd", box).onclick = (e) => busy(e.currentTarget, async () => {
+      if (!$("#pdlinks", box).value.trim()) return toast("Paste at least one link");
+      await designImport($("#pdlinks", box).value, $("#pdres", box));
+      await load();
+    });
+  });
+}
+
 async function gsDesigns(el) {
-  const dl = await gsDesignList(), live = gsLive();
-  el.innerHTML = `<div class="grid g3" style="gap:12px;margin-bottom:12px">
-    <div class="card" style="margin:0"><h3>Add from links</h3><p class="small muted" style="margin-top:0">One or several links, one per line: a template page (Slidesgo or any site) or a Google Slides link.</p>
+  const [dl, fold] = await Promise.all([gsDesignList(), api("/api/designs/folder")]), live = gsLive();
+  el.innerHTML = `<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;gap:10px"><div><h3 style="margin:0">Designs folder</h3>
+      <div class="small muted" style="margin-top:4px">Drop any .pptx files in <code>${esc(fold.path)}</code>: each one becomes a design here, with its picture, by itself. <b>${fold.count}</b> file${fold.count === 1 ? "" : "s"} in it now. Change the folder under Settings.</div></div>
+      <button class="btn" id="dopenf">Open Designs folder</button></div></div>
+    <div class="grid g3" style="gap:12px;margin-bottom:12px">
+    <div class="card" style="margin:0"><h3>Add from links</h3><p class="small muted" style="margin-top:0">One or several links, one per line, to <b>free</b> templates: Slidesgo, SlidesCarnival, Microsoft templates, a public Google Slides deck or any template page. A.F.R.A saves the template's own free .pptx into the Designs folder, with its credit. It never signs in and skips paid templates.</p>
       <textarea id="dlinks" rows="4" placeholder="https://slidesgo.com/theme/…&#10;https://docs.google.com/presentation/d/…"></textarea>
       <div class="row" style="margin-top:8px"><button class="btn primary small" id="dadd">Add designs</button></div><div id="dres" class="small" style="margin-top:6px"></div></div>
-    <div class="card" style="margin:0"><h3>Add a PowerPoint</h3><p class="small muted" style="margin-top:0">A .pptx template or any deck you like. A.F.R.A takes its colours and fonts; in Google Slides it also keeps its real layouts.</p>
+    <div class="card" style="margin:0"><h3>Add a PowerPoint</h3><p class="small muted" style="margin-top:0">A .pptx template or any deck you like; it is also saved in the Designs folder. A.F.R.A takes its colours and fonts; in Google Slides it also keeps its real layouts.</p>
       <input type="file" id="dpptx" accept=".pptx"></div>
     <div class="card" style="margin:0"><h3>From colours</h3><input type="text" id="dcname" placeholder="Name">
       <input type="text" id="dccols" placeholder="#14213D, #FFC857, #3C7DC4" style="margin-top:6px"><input type="text" id="dcfonts" placeholder="Fonts: Georgia, Arial" style="margin-top:6px">
@@ -1978,13 +2038,14 @@ async function gsDesigns(el) {
   $("#dadd").onclick = (e) => busy(e.currentTarget, async () => {
     const txt = $("#dlinks").value;
     if (/docs\.google\.com\/presentation/.test(txt) && !live.length) toast("Google Slides links need a connected Google account; the other links are added now");
-    const r = await api("/api/designs", { body: { links: txt, account: "" } });
-    toast(`${r.added.length} design${r.added.length === 1 ? "" : "s"} added`, r.added.length ? "ok" : "");
+    if (!txt.trim()) return toast("Paste at least one link");
+    const j = await designImport(txt, $("#dres"));
+    const n = j.items.filter((i) => IMP_OK.has(i.status) || i.name).length;
     await again();
-    if (r.errors.length) $("#dres").innerHTML = r.errors.map((x) => `<div class="notice bad small" style="margin:4px 0">${esc(x.url)}: ${esc(x.error)}</div>`).join("");
-    const notes = r.added.filter((d) => d.note).map((d) => `<div class="notice small" style="margin:4px 0">${esc(d.name)}: ${esc(d.note)}</div>`).join("");
-    if (notes) $("#dres").innerHTML += notes;
+    $("#dres").innerHTML = impRows(j);
+    toast(`${n} design${n === 1 ? "" : "s"} added`, n ? "ok" : "");
   });
+  $("#dopenf").onclick = (e) => busy(e.currentTarget, () => api("/api/designs/folder/open", { method: "POST" }));
   $("#dpptx").onchange = async (e) => {
     const fd = new FormData(); fd.append("file", e.target.files[0]);
     try { const d = await api("/api/designs/pptx", { body: fd }); toast(`Added "${d.name}"`, "ok"); again(); } catch (err) { toast(err.message, "bad"); }
@@ -1998,7 +2059,7 @@ async function gsDesigns(el) {
   $("#drest").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/designs/restore", { method: "POST" }); again(); });
   $$("[data-dren]").forEach((b) => b.onclick = async () => { const d = dl.designs.find((x) => x.id === b.dataset.dren); const n = prompt("New name", d.name); if (n && n.trim()) { await api(`/api/designs/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n.trim() } }); again(); } });
   $$("[data-ddef]").forEach((b) => b.onclick = () => busy(b, async () => { await api(`/api/designs/${encodeURIComponent(b.dataset.ddef)}`, { method: "PATCH", body: { default: true } }); GS.design = b.dataset.ddef; again(); }));
-  $$("[data-ddel]").forEach((b) => b.onclick = () => { const d = dl.designs.find((x) => x.id === b.dataset.ddel); if (confirm(`Delete the design "${d.name}"?${d.accounts.length ? " Its Google template copies go to the Drive bin." : ""}`)) busy(b, async () => { await api(`/api/designs/${encodeURIComponent(d.id)}`, { method: "DELETE" }); if (GS.design === d.id) GS.design = ""; again(); }); });
+  $$("[data-ddel]").forEach((b) => b.onclick = () => { const d = dl.designs.find((x) => x.id === b.dataset.ddel); if (confirm(`Delete the design "${d.name}"?${d.in_folder ? " Its .pptx file in the Designs folder goes to the Recycle Bin." : ""}${d.accounts.length ? " Its Google template copies go to the Drive bin." : ""}`)) busy(b, async () => { await api(`/api/designs/${encodeURIComponent(d.id)}`, { method: "DELETE" }); if (GS.design === d.id) GS.design = ""; again(); }); });
 }
 
 async function gsDecks(el) {
@@ -2073,7 +2134,10 @@ VIEWS.settings = async () => {
   const s = S.settings = await api("/api/settings");
   main().innerHTML = `<div class="page-head"><div><h1>Settings</h1><p>Stored locally in <code>data/settings.json</code>. Nothing leaves your computer except calls to the AI and search providers you choose.</p></div></div>
   <div class="card" style="margin-bottom:16px"><h3>How A.F.R.A uses AI</h3><div id="claudeBox" class="small muted">Checking…</div></div>
-  <div class="card" style="margin-bottom:16px"><h3>Tugas folder</h3><p class="small muted" style="margin-top:0">Where the folders of the <a href="#tugas">Tugas</a> page live on this computer. Leave empty for <code>Documents/A.F.R.A Tugas</code>. Existing folders are not moved: copy them across yourself when you change this.</p><div class="row"><input type="text" id="s_tugas_dir" class="grow" value="${esc(s.tugas_dir || "")}" placeholder="e.g. D:/Kuliah/Tugas"><button class="btn primary" id="savetg">Save</button></div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Tugas folder</h3><p class="small muted" style="margin-top:0">Where the folders of the <a href="#tugas">Tugas</a> page live on this computer. Leave empty for <code>Documents/A.F.R.A Tugas</code>. Existing folders are not moved: copy them across yourself when you change this.</p><div class="row"><input type="text" id="s_tugas_dir" class="grow" value="${esc(s.tugas_dir || "")}" placeholder="e.g. D:/Kuliah/Tugas"><button class="btn primary" id="savetg">Save</button></div>
+    <h3 style="margin-top:16px">Designs folder</h3><p class="small muted" style="margin-top:0">Any .pptx in this folder (subfolders too) shows up as a design on the Slides page and in <b>New deck</b>. Leave empty for the <code>_Designs</code> folder inside the Tugas folder. <span id="dfcount"></span></p>
+    <div class="row"><input type="text" id="s_designs_dir" class="grow" value="${esc(s.designs_dir || "")}" placeholder="e.g. D:/Kuliah/Designs"><button class="btn" id="opendf">Open Designs folder</button></div>
+    <label class="f">Model that reads template previews <small>(only when a template has no .pptx to download; needs an OpenRouter key)</small></label><input type="text" id="s_template_vision_model" value="${esc(s.template_vision_model || "")}" placeholder="z-ai/glm-4.5v"></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Google Slides and Drive</h3><p class="small muted" style="margin-top:0">Decks are made under <a href="#gslides">Slides</a>. Connect one or more Google accounts here or there.</p><div id="googleBox" class="small muted">Checking…</div></div>
@@ -2197,6 +2261,9 @@ VIEWS.settings = async () => {
   const doSave = async (quiet) => { S.settings = await api("/api/settings", { method: "PUT", body: collect() }); renderLLMStatus(); if (quiet !== true) toast("Settings saved", "ok"); };
   $("#save1").onclick = async () => { await doSave(); loadModels(true); };
   $("#save2").onclick = $("#save3").onclick = $("#savetg").onclick = doSave;
+  const dfCount = () => api("/api/designs/folder").then((f) => { $("#dfcount").textContent = `${f.count} .pptx file${f.count === 1 ? "" : "s"} in ${f.path}`; }).catch(() => { });
+  dfCount();
+  $("#opendf").onclick = (e) => busy(e.currentTarget, async () => { await doSave(true); await api("/api/designs/folder/open", { method: "POST" }); dfCount(); });
   $("#test").onclick = (e) => busy(e.currentTarget, async () => {
     await doSave(true); $("#tres").textContent = "";
     try {
@@ -2409,9 +2476,9 @@ function tgRender() {
   const crumbs = [`<a href="#tugas" data-p="" data-drop>All Tugas</a>`, ...d.crumbs.map((c) => `<a href="${tgUrl(c.path)}" data-p="${esc(c.path)}" data-drop>${esc(c.name)}</a>`)].join(" <span class='muted'>/</span> ");
   main().innerHTML = `<div class="page-head"><div><h1>Tugas</h1><p>Folders for every assignment, kept on your computer in <code>${esc(d.root)}</code>. File Explorer and Finder see the same folders.</p></div>
     <div class="row"><input type="text" id="tgq" placeholder="Search names…" value="${esc(T.query)}" style="width:190px"><button class="btn" data-act="mode" title="Switch grid and list">${T.mode === "grid" ? "List view" : "Grid view"}</button>
-    <button class="btn" data-act="upload">Upload</button><button class="btn primary" data-act="mkdir">New folder</button><input type="file" id="tgfile" multiple hidden></div></div>
+    <button class="btn" data-act="upload">Upload</button>${atRoot ? "" : '<button class="btn" data-act="newdeck">New deck</button>'}<button class="btn primary" data-act="mkdir">New folder</button><input type="file" id="tgfile" multiple hidden></div></div>
     <div class="tg"><div class="card tg-tree"><div class="tg-row ${!T.path ? "on" : ""}" data-p="" data-drop><span class="tg-caret none"></span><a href="#tugas"><b>All Tugas</b></a></div>${T.tree.children.map((n) => tgNode(n, 0)).join("")}</div>
-    <div class="card tg-main" data-p="${esc(T.path)}"><div class="tg-crumbs">${crumbs}</div>${info}${soon}${body}</div></div>`;
+    <div class="card tg-main" data-p="${esc(T.path)}"><div class="tg-crumbs">${crumbs}</div><div id="tgselbar" class="tg-info row hidden" style="gap:8px"></div>${info}${soon}${body}</div></div>`;
   tgWire();
 }
 const tgSelected = () => [...T.sel];
@@ -2469,6 +2536,77 @@ async function tgLink(path) {
     closeModal(); tgDo(() => api("/api/tugas/meta", { method: "PUT", body }), "Saved");
   };
 }
+const tgIsPptx = (it) => it && it.kind === "file" && it.ext === "pptx";
+function tgSelBar() {  // one selected .pptx: the things to do with it
+  const bar = $("#tgselbar"); if (!bar) return;
+  const it = T.sel.size === 1 ? T.data.items.find((i) => i.path === [...T.sel][0]) : null;
+  if (!tgIsPptx(it)) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
+  bar.classList.remove("hidden");
+  bar.innerHTML = `<span class="small"><b>${esc(it.name)}</b></span><button class="btn small" data-sb="open">Open in PowerPoint</button>
+    <button class="btn small" data-sb="gslides">Open in Google Slides</button><button class="btn small" data-sb="design">Use as design</button>`;
+  $$("[data-sb]", bar).forEach((b) => b.onclick = () => busy(b, () => ({ open: () => tgOpen(it), gslides: () => tgGoogle(it), design: () => tgUseDesign(it) })[b.dataset.sb]()));
+}
+async function tgGoogle(it) {
+  try {
+    const r = await api("/api/tugas/google-slides", { body: { path: it.path } });
+    toast("In Google Slides now (A.F.R.A Decks)", "ok"); window.open(r.url, "_blank");
+  } catch (e) {
+    if (!/Google account/.test(e.message)) return toast(e.message, "bad");
+    const box = modal(`<h2>Connect Google first</h2><p>${esc(e.message)}</p><div class="modal-foot"><button class="btn" id="tgx">Close</button><button class="btn primary" id="tgok">Open Settings</button></div>`);
+    $("#tgx", box).onclick = closeModal; $("#tgok", box).onclick = () => { closeModal(); location.hash = "#settings"; };
+  }
+}
+async function tgUseDesign(it) {
+  const r = await api("/api/tugas/use-as-design", { body: { path: it.path } });
+  toast(`"${r.name}" is now a design (Designs folder)`, "ok");
+}
+// New deck: pick a design, then a title and where the slides come from. The saving is one call (/api/tugas/deck).
+async function tgNewDeck() {
+  if (!T.path) return toast("Open a folder first: the deck is saved inside it");
+  const design = await pickDesign({ title: "New deck: pick a design", button: "Next" });
+  if (design) tgDeckForm(design);
+}
+async function tgDeckForm(design) {
+  const here = T.data.links.filter((l) => l.type === "doc");
+  const all = await api(`/api/projects/${S.project.id}/documents?kind=doc`).catch(() => []);
+  const opt = (id, title, pid) => `<option value="${esc(id)}" data-pid="${esc(pid)}">${esc(title)}</option>`;
+  const box = modal(`<h2>New deck</h2><p class="small muted" style="margin-top:0">Saved in <b>${esc(T.path)}</b> as a .pptx.</p>
+    <div class="row" style="gap:12px;align-items:flex-start"><div style="width:150px">${pdCard(design, true)}</div><div class="grow">
+      <button class="btn small ghost" id="ndch">Change design</button>
+      <label class="f">Title</label><input type="text" id="ndt" value="${esc(tgBase(T.path))}">
+      <label class="f">Slides from</label><select id="nds"><option value="">Blank outline (fill it in PowerPoint)</option>
+        ${here.length ? `<optgroup label="Linked to this folder">${here.map((l) => opt(l.id, l.title, l.project_id)).join("")}</optgroup>` : ""}
+        ${all.length ? `<optgroup label="Documents in ${esc(S.project.name)}">${all.map((d) => opt(d.id, d.title, S.project.id)).join("")}</optgroup>` : ""}</select>
+      <div class="small muted" style="margin-top:4px" id="ndn">A document is turned into an outline and slides by the AI, like on the Slides page.</div></div></div>
+    <div id="ndst" class="small" style="margin-top:10px"></div>
+    <div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Create deck</button></div>`);
+  $("#tgx", box).onclick = closeModal;
+  $("#ndch", box).onclick = async () => { const d = await pickDesign({ selected: design.id, title: "New deck: pick a design", button: "Next" }); if (d) tgDeckForm(d); };
+  $("#tgok", box).onclick = (e) => busy(e.currentTarget, async () => {
+    const title = $("#ndt", box).value.trim(), sel = $("#nds", box), st = $("#ndst", box);
+    if (!title) return toast("Give the deck a title");
+    const body = { path: T.path, design_id: design.id, title };
+    if (sel.value) {
+      const o = sel.selectedOptions[0], mat = { project_id: o.dataset.pid, title, topic: o.textContent, document_id: sel.value, minutes: 10, tone: "academic", notes: true };
+      st.innerHTML = `<span class="spin"></span> Writing the outline…`;
+      const outline = await api("/api/decks/outline", { body: mat });
+      st.innerHTML = `<span class="spin"></span> Writing ${outline.slides.length} slides…`;
+      body.slides = (await api("/api/decks/content", { body: { ...mat, outline } })).slides;
+    } else body.source = { type: "blank" };
+    st.innerHTML = `<span class="spin"></span> Starting…`;
+    const { job } = await api("/api/tugas/deck", { body });
+    for (; ;) {
+      const j = await api("/api/tugas/deck/jobs/" + job);
+      if (j.state === "error") { st.innerHTML = `<span class="pill bad">Failed</span> ${esc(j.error)}`; return; }
+      if (j.state === "done") {
+        closeModal(); T.sel = new Set([j.result.path]); await tgLoad(T.path, true); T.sel = new Set([j.result.path]); tgRender(); tgSelBar();
+        return toast(`Saved “${j.result.name}” in this folder`, "ok");
+      }
+      st.innerHTML = `<span class="spin"></span> ${esc(j.step)}`;
+      await sleep(900);
+    }
+  });
+}
 const tgOpen = (it) => it.kind === "folder" ? (location.hash = tgUrl(it.path)) : api("/api/tugas/open", { body: { path: it.path } }).catch((e) => toast(e.message, "bad"));
 function tgContext(e) {
   e.preventDefault();
@@ -2476,9 +2614,9 @@ function tgContext(e) {
   if (el && !T.sel.has(path)) { T.sel = new Set([path]); $$(".tg-item").forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p))); }
   const sel = tgSelected(), one = el && sel.length === 1 ? T.data.items.find((i) => i.path === sel[0]) : null;
   let list;
-  if (!el) list = [["mkdir", "New folder"], ["upload", "Upload files…"], ["-"], ["reveal", "Show this folder in File Explorer"]];
+  if (!el) list = [["mkdir", "New folder"], ["upload", "Upload files…"], ...(T.path ? [["newdeck", "New deck…"]] : []), ["-"], ["reveal", "Show this folder in File Explorer"]];
   else if (!one) list = [["trash", "Move to Recycle Bin", "danger"]];
-  else list = [["open", "Open"], ["reveal", "Show in File Explorer"], ["rename", "Rename"], ...(one.kind === "folder" ? [["-"], ["meta", "Set due date / note"], ["link", "Link A.F.R.A document or paper"]] : []), ["-"], ["trash", "Move to Recycle Bin", "danger"]];
+  else list = [["open", tgIsPptx(one) ? "Open in PowerPoint" : "Open"], ...(tgIsPptx(one) ? [["gslides", "Open in Google Slides"], ["design", "Use as design"]] : []), ["reveal", "Show in File Explorer"], ["rename", "Rename"], ...(one.kind === "folder" ? [["-"], ["meta", "Set due date / note"], ["link", "Link A.F.R.A document or paper"]] : []), ["-"], ["trash", "Move to Recycle Bin", "danger"]];
   $$(".tg-menu").forEach((m) => m.remove());
   const m = document.createElement("div"); m.className = "tg-menu";
   m.innerHTML = list.map(([k, label, cls]) => k === "-" ? "<hr>" : `<button data-k="${k}" class="${cls || ""}">${label}</button>`).join("");
@@ -2486,7 +2624,8 @@ function tgContext(e) {
   m.style.left = Math.max(4, Math.min(e.clientX, innerWidth - m.offsetWidth - 8)) + "px"; m.style.top = Math.max(4, Math.min(e.clientY, innerHeight - m.offsetHeight - 8)) + "px";
   m.onclick = (ev) => {
     const k = ev.target.dataset.k; if (!k) return; m.remove();
-    if (k === "mkdir") tgNew(); else if (k === "upload") $("#tgfile").click();
+    if (k === "mkdir") tgNew(); else if (k === "upload") $("#tgfile").click(); else if (k === "newdeck") tgNewDeck();
+    else if (k === "gslides") tgGoogle(one); else if (k === "design") tgUseDesign(one).catch((x) => toast(x.message, "bad"));
     else if (k === "reveal") api("/api/tugas/reveal", { body: { path: one ? one.path : T.path } }).catch((x) => toast(x.message, "bad"));
     else if (k === "open") tgOpen(one); else if (k === "rename") tgRename(one.path);
     else if (k === "meta") tgMeta(one.path).catch((x) => toast(x.message, "bad")); else if (k === "link") tgLink(one.path).catch((x) => toast(x.message, "bad")); else if (k === "trash") tgTrash(sel);
@@ -2501,7 +2640,7 @@ function tgWire() {
   }, 300);
   $$("[data-act]", root).forEach((b) => b.onclick = () => {
     const a = b.dataset.act;
-    if (a === "mkdir") tgNew(); else if (a === "upload") $("#tgfile").click();
+    if (a === "mkdir") tgNew(); else if (a === "upload") $("#tgfile").click(); else if (a === "newdeck") tgNewDeck();
     else if (a === "mode") { T.mode = T.mode === "grid" ? "list" : "grid"; try { localStorage.setItem("rt_tugas_mode", T.mode); } catch { } tgRender(); }
     else if (a === "meta") tgMeta(T.path).catch((x) => toast(x.message, "bad")); else if (a === "link") tgLink(T.path).catch((x) => toast(x.message, "bad"));
   });
@@ -2527,6 +2666,7 @@ function tgWire() {
       else if (e.ctrlKey || e.metaKey) { T.sel.has(p) ? T.sel.delete(p) : T.sel.add(p); T.last = p; }
       else { T.sel = new Set([p]); T.last = p; }
       $$(".tg-item", root).forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p)));
+      tgSelBar();
     };
     el.ondblclick = (e) => { if (e.target.tagName !== "INPUT") tgOpen(it); };
     el.ondragstart = (e) => {
@@ -2553,7 +2693,8 @@ function tgWire() {
   pane.ondragover = (e) => { if (hasFiles(e)) { e.preventDefault(); pane.classList.add("drop"); } };
   pane.ondragleave = (e) => { if (!pane.contains(e.relatedTarget)) pane.classList.remove("drop"); };
   pane.ondrop = (e) => { if (hasFiles(e)) { e.preventDefault(); pane.classList.remove("drop"); tgUpload(e.dataTransfer.files); } };
-  pane.onclick = (e) => { if (!e.target.closest(".tg-item, button, a, input, label")) { T.sel = new Set(); $$(".tg-item", root).forEach((x) => x.classList.remove("sel")); } };
+  pane.onclick = (e) => { if (!e.target.closest(".tg-item, button, a, input, label")) { T.sel = new Set(); $$(".tg-item", root).forEach((x) => x.classList.remove("sel")); tgSelBar(); } };
+  tgSelBar();
 }
 if (!window.__tgKeys) {
   window.__tgKeys = true;
