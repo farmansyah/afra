@@ -19,7 +19,7 @@ import httpx
 
 from . import db
 from .citations import parse_bibtex, to_bibtex, to_ris
-from .config import get_settings
+from .config import get_settings, replace_file
 from .search import split_name
 
 LOCAL = "http://127.0.0.1:23119/api/users/0"
@@ -180,7 +180,7 @@ def auto_export(project_id: str):
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
-    tmp.replace(p)  # atomic: other apps never see a half-written file
+    replace_file(tmp, p)  # atomic: other apps never see a half-written file
     return {"exported": len(papers), "path": str(p)}
 
 

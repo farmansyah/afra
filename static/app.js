@@ -208,13 +208,16 @@ async function studioPanel(el, ctx = {}) {
   if (working) setTimeout(() => { if (el.isConnected) studioPanel(el, ctx); }, 3000);
 }
 const EXEC = [/^\/api\/tools\/(run|ask-library|suggest-citations)$/, /^\/api\/papers\/[^/]+\/summarize$/,
-  /^\/api\/paper\/[^/]+\/(style-guide|literature|outline|review|section\/\d+|abstract)$/, /^\/api\/gaps\/[^/]+\/write$/];
+  /^\/api\/paper\/[^/]+\/(style-guide|literature|outline|review|section\/\d+|abstract)$/, /^\/api\/gaps\/[^/]+\/write$/,
+  /^\/api\/decks\/(outline|content)$/, /^\/api\/decks\/[^/]+\/redo$/, /^\/api\/wizard\/[^/]+\/(analyze|mockup|rewrite|essay\/revise)$/];
 function execLabel(path, body = {}) {
   if (path === "/api/tools/run") return S.meta?.tools?.[body.tool] || "Writing tool";
   if (path === "/api/tools/ask-library") return "Ask your library";
   if (path === "/api/tools/suggest-citations") return "Suggest citations";
   if (path.endsWith("/summarize")) return "Reading notes";
   if (path.startsWith("/api/gaps/")) return "Gap analysis write-up";
+  if (path.startsWith("/api/wizard/")) return "Create into PPT: " + ({ analyze: "read your documents", mockup: "write the mockup", rewrite: "rewrite a slide", revise: "change the essay" }[path.split("/").pop()] || "AI step");
+  if (path.startsWith("/api/decks/")) return "Slides: " + (path.endsWith("/outline") ? "outline" : path.endsWith("/content") ? "write the slides" : "rewrite a slide");
   const step = (path.match(/\/api\/paper\/[^/]+\/([a-z-]+)/) || [])[1] || "";
   return "Paper Writer: " + ({ "style-guide": "style guide", literature: "literature synthesis", outline: "outline", review: "reviewer check", section: "section draft", abstract: "title & abstract" }[step] || step);
 }
@@ -1014,7 +1017,7 @@ async function paperDialog(id, onChange) {
     <div class="card" style="margin:12px 0 0;padding:10px 12px"><div class="row" style="justify-content:space-between"><div><b>PDF</b> <span class="small muted">${p.has_pdf ? "attached" : "not attached"}${p.fulltext ? ` · full text ${p.fulltext.length.toLocaleString()} characters` : ""}${p.quotes ? ` · ${p.quotes} quotes/notes` : ""}</span></div>
       <div class="row">${p.has_pdf ? `<button class="btn small primary" id="pread">Open reader</button>` : `<button class="btn small" id="pfetch">Find open-access PDF</button>`}<label class="btn small">${p.has_pdf ? "Replace" : "Attach"} PDF<input type="file" id="pattach" accept=".pdf" hidden></label></div></div></div>
     <div class="modal-foot" style="justify-content:space-between"><div class="row"><button class="btn danger" id="pdel">Delete</button>
-      <button class="btn ghost" id="pshare">💬 Share in chat</button><button class="btn" id="psum">AI reading notes</button>${p.doi || p.openalex_id ? `<button class="btn ghost" data-psb="references">References</button><button class="btn ghost" data-psb="citing">Cited by</button><button class="btn ghost" data-psb="related">Related</button>` : ""}${!p.fulltext && (p.pdf_url || p.url) ? `<button class="btn" id="pft">Fetch full text</button>` : ""}</div>
+      <button class="btn ghost" id="pshare">💬 Share in chat</button><button class="btn ghost" id="pppt">Create into PPT</button><button class="btn" id="psum">AI reading notes</button>${p.doi || p.openalex_id ? `<button class="btn ghost" data-psb="references">References</button><button class="btn ghost" data-psb="citing">Cited by</button><button class="btn ghost" data-psb="related">Related</button>` : ""}${!p.fulltext && (p.pdf_url || p.url) ? `<button class="btn" id="pft">Fetch full text</button>` : ""}</div>
       <div class="row"><button class="btn" onclick="closeModal()">Close</button><button class="btn primary" id="psave">Save</button></div></div>`, true);
   $("#cpk", box).onclick = () => { copyAnd(`[@${p.key}]`, "Copied"); };
   $$("[data-psb]", box).forEach((b) => b.onclick = () => { S.snowball = { ident: p.openalex_id || p.doi, mode: b.dataset.psb, title: p.title }; closeModal(); if (location.hash === "#search") route(); else location.hash = "#search"; });
@@ -1025,6 +1028,7 @@ async function paperDialog(id, onChange) {
     await api(`/api/papers/${id}`, { method: "PUT", body }); closeModal(); toast("Saved", "ok"); onChange && onChange();
   });
   $("#pdel", box).onclick = async () => { if (!confirm("Remove this paper from the library?")) return; await api(`/api/papers/${id}`, { method: "DELETE" }); closeModal(); onChange && onChange(); };
+  $("#pppt", box).onclick = () => { closeModal(); startWizard({ mode: "paper", paper_id: id }); };
   $("#pshare", box).onclick = () => {
     const au = (p.authors || []).map((a) => a.family || a.given).filter(Boolean);
     const who = au.length > 2 ? au[0] + " et al." : au.join(" & ");
@@ -1281,7 +1285,7 @@ async function docEditor(id) {
   main().innerHTML = `
   <div class="page-head"><div class="row grow"><a href="#docs" class="btn ghost">← Documents</a><input type="text" id="dtitle" value="${esc(doc.title)}" style="font:600 18px var(--serif);max-width:640px"></div><span class="muted small" id="dsaved">Saved</span></div>
   <div class="toolbar">
-    <button class="btn small primary" id="dexp">Export DOCX</button><button class="btn small" id="dslides">Slides</button><button class="btn small" id="dcite">Insert citation</button>
+    <button class="btn small primary" id="dexp">Export DOCX</button><button class="btn small" id="dslides">Slides</button><button class="btn small" id="dppt">Create into PPT</button><button class="btn small" id="dcite">Insert citation</button>
     <button class="btn small" id="dsugg">Suggest citations</button><button class="btn small" id="dqc">Quality check</button><button class="btn small" id="dsim">Similarity</button><button class="btn small" id="dev" title="Select an argument in the editor; find papers that back it">Find evidence</button><button class="btn small" id="dref">Check references</button><button class="btn small" id="dfit">Journal fit</button>
     <span class="sep"></span>
     <select id="dtool" style="width:210px">${Object.entries(S.meta.tools).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
@@ -1323,6 +1327,7 @@ async function docEditor(id) {
   $("#dlayout").onchange = (e) => { const v = e.target.value; $("#dwrap").className = "editor-wrap" + (v === "split" ? "" : " single"); ta.style.display = v === "preview" ? "none" : ""; $("#dprev").style.display = v === "edit" ? "none" : ""; };
   $("#dexp").onclick = () => exportDialog({ markdown: ta.value, meta: { title: "", doc_type: doc.meta?.doc_type, lang: doc.meta?.lang }, template: doc.meta?.template, filenameHint: $("#dtitle").value });
   $("#dslides").onclick = () => { const box = modal(`<h2>Make slides</h2><div id="slp" class="small muted">Loading…</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`, true); slidesPanel($("#slp", box), $("#dtitle").value); };
+  $("#dppt").onclick = () => startWizard({ mode: "doc", doc_id: id });
   $("#dcite").onclick = () => citePicker((c) => insertAtCursor(ta, c));
   $("#dshare").onclick = () => {
     const body = ta.value.replace(/^#.*$/m, "").replace(/\[@[^\]]*\]/g, "").replace(/[#*_>`]/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -1723,6 +1728,396 @@ VIEWS.usage = async () => {
   $("#ud").onchange = draw; draw();
 };
 
+// ================================================================== SLIDES STUDIO (Google Slides and PowerPoint decks)
+const GS = { tab: "new", design: "", outline: null, content: null, materials: [], sheet: null, info: null };
+const GKIND = { builtin: "A.F.R.A", web: "Web page", pptx: "PowerPoint", slides: "Google Slides", colors: "Colours" };
+const GLAYOUTS = ["title", "section", "content", "two_column", "table", "chart", "figure", "references", "closing"];
+const GCC = "https://console.cloud.google.com";
+const GSETUP = `<ol class="small" style="padding-left:18px;margin:6px 0;line-height:1.65">
+  <li><a href="${GCC}/projectcreate" target="_blank">Google Cloud › New project</a>: name it <b>A.F.R.A</b>, click Create, and keep it selected at the top.</li>
+  <li>Turn on three APIs (open each, click <b>Enable</b>): <a href="${GCC}/apis/library/drive.googleapis.com" target="_blank">Google Drive API</a>,
+    <a href="${GCC}/apis/library/slides.googleapis.com" target="_blank">Google Slides API</a>, <a href="${GCC}/apis/library/sheets.googleapis.com" target="_blank">Google Sheets API</a>.</li>
+  <li><a href="${GCC}/auth/overview" target="_blank">OAuth consent screen</a> (Google Auth Platform): app name <b>A.F.R.A</b>, your email, audience <b>External</b>.
+    Leave it in <b>Testing</b> and add every Google account you will connect under <b>Audience › Test users</b>.</li>
+  <li><a href="${GCC}/auth/clients" target="_blank">Clients › Create client</a>: application type <b>Desktop app</b>, name A.F.R.A, Create.</li>
+  <li>Click <b>Download JSON</b>, open the file in a text editor, copy all of it and paste it below (or save it as <code>data/google_client.json</code>).</li></ol>
+  <div class="small muted">In Testing mode Google ends the sign-in after 7 days; A.F.R.A then shows <b>Reconnect</b> (one click). The client secret stays in A.F.R.A's data folder and is never shown again.</div>`;
+
+function gsSwatch(t) { return ["dark", "accent", "accent2", "light", "text"].map((k) => `<i style="background:${esc(t[k])}" title="${k} ${esc(t[k])}"></i>`).join(""); }
+function gsCard(d, pick) {
+  const t = d.theme || {};
+  return `<div class="dcard${pick && GS.design === d.id ? " sel" : ""}" data-did="${esc(d.id)}">
+    <img src="/api/designs/${encodeURIComponent(d.id)}/thumb?v=${Math.round(d.added || 0)}" alt="" loading="lazy">
+    <div class="dmeta"><div class="t">${esc(d.name)} ${d.default ? `<span class="pill ok">default</span>` : ""}</div>
+      <div class="sw">${gsSwatch(t)}</div>
+      <div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)} · ${esc(t.heading_font || "")}${t.body_font && t.body_font !== t.heading_font ? " / " + esc(t.body_font) : ""}</div>
+      ${pick ? "" : `<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px">
+        <button class="btn small ghost" data-dren="${esc(d.id)}">Rename</button>${d.default ? "" : `<button class="btn small ghost" data-ddef="${esc(d.id)}">Make default</button>`}
+        ${d.source_url ? `<a class="btn small ghost" href="${esc(d.source_url)}" target="_blank">Source</a>` : ""}<button class="btn small ghost" data-ddel="${esc(d.id)}">Delete</button></div>`}</div></div>`;
+}
+async function gsDesignList() { const r = await api("/api/designs"); if (!GS.design) GS.design = (r.designs.find((d) => d.default) || r.designs[0] || {}).id || ""; return r; }
+async function gsInfo() { GS.info = await api("/api/google/accounts"); return GS.info; }
+const gsLive = () => (GS.info?.accounts || []).filter((a) => !a.needs_reconnect);
+
+async function gsConnect(hint = "") {
+  const r = await api("/api/google/connect", { body: { login_hint: hint } });
+  window.open(r.url, "_blank");
+  toast("Sign in with Google in the new tab, then come back here");
+  for (let i = 0; i < 300; i++) {
+    await new Promise((res) => setTimeout(res, 2000));
+    const st = await api(`/api/google/connect/${r.state}`);
+    if (st.status === "done") { toast(`Connected ${st.email}`, "ok"); return st.email; }
+    if (st.status === "error") throw new Error(st.error);
+  }
+  throw new Error("The sign-in timed out. Click Connect again.");
+}
+
+async function gsAccounts(el, onChange = () => { }) {
+  const info = await gsInfo(), c = info.client;
+  const drive = info.drive_folder ? `<div class="small" style="margin-top:8px">Google Drive for desktop: <b>found</b> (<code>${esc(info.drive_folder)}</code>). PowerPoint decks go to <b>My Drive › A.F.R.A Decks</b> even without connecting.</div>`
+    : `<div class="small muted" style="margin-top:8px">Google Drive for desktop isn't installed: without a connected account, PowerPoint decks are saved on this computer.</div>`;
+  if (!c.configured) {
+    el.innerHTML = `<div class="notice info small" style="margin-bottom:8px"><b>Set up Google once (about 5 minutes).</b> A.F.R.A uses your own free Google Cloud "client", so your files only go between your computer and Google.</div>${GSETUP}
+      <label class="f">Paste the downloaded JSON</label><textarea id="gcjson" rows="4" placeholder='{"installed":{"client_id":"…apps.googleusercontent.com", …}}'></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn primary small" id="gcsave">Save and connect</button></div>${drive}`;
+    $("#gcsave", el).onclick = (e) => busy(e.currentTarget, async () => {
+      await api("/api/google/client", { body: { json: $("#gcjson", el).value } });
+      await gsConnect(); gsAccounts(el, onChange); onChange();
+    });
+    return;
+  }
+  el.innerHTML = `${info.accounts.length ? info.accounts.map((a) => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
+      <div><b>${esc(a.email)}</b> ${a.default ? `<span class="pill ok">default</span>` : ""} ${a.needs_reconnect ? `<span class="pill bad">signed out</span>` : ""}</div>
+      <div class="row" style="gap:4px">${a.needs_reconnect ? `<button class="btn small primary" data-grec="${esc(a.email)}">Reconnect</button>` : ""}
+        ${a.default ? "" : `<button class="btn small ghost" data-gdef="${esc(a.email)}">Make default</button>`}<button class="btn small ghost" data-gdis="${esc(a.email)}">Disconnect</button></div></div>`).join("")
+      : `<div class="small muted">No Google account connected yet.</div>`}
+    <div class="row" style="margin-top:10px"><button class="btn small primary" id="gadd">${info.accounts.length ? "Connect another account" : "Connect Google"}</button></div>
+    ${drive}
+    <details style="margin-top:10px"><summary class="small">Google client ${esc(c.project_id || "")} <span class="muted">${esc(c.client_hint)}</span></summary>
+      <label class="f">Replace the client JSON</label><textarea id="gcjson" rows="3"></textarea>
+      <label class="f">Picker API key <small>(optional: lets you pick Sheets from Drive; without it paste a link or upload the file)</small></label>
+      <input type="text" id="gpick" placeholder="${c.picker ? "saved (type to replace)" : "AIza…"}">
+      <div class="row" style="margin-top:8px"><button class="btn small" id="gcsave">Save</button></div>
+      <div class="small muted" style="margin-top:6px">Steps again:</div>${GSETUP}</details>`;
+  const redo = () => { gsAccounts(el, onChange); onChange(); };
+  $("#gadd", el).onclick = (e) => busy(e.currentTarget, async () => { await gsConnect(); redo(); });
+  $$("[data-grec]", el).forEach((b) => b.onclick = () => busy(b, async () => { await gsConnect(b.dataset.grec); redo(); }));
+  $$("[data-gdef]", el).forEach((b) => b.onclick = () => busy(b, async () => { await api("/api/google/default", { body: { email: b.dataset.gdef } }); redo(); }));
+  $$("[data-gdis]", el).forEach((b) => b.onclick = () => { if (confirm(`Disconnect ${b.dataset.gdis}? A.F.R.A forgets the sign-in and asks Google to revoke it. Files stay in Drive.`)) busy(b, async () => { await api("/api/google/disconnect", { body: { email: b.dataset.gdis } }); redo(); }); });
+  $("#gcsave", el).onclick = (e) => busy(e.currentTarget, async () => {
+    const k = $("#gpick", el).value.trim();
+    await api("/api/google/client", { body: { json: $("#gcjson", el).value, ...(k ? { picker_api_key: k } : {}) } }); toast("Saved", "ok"); redo();
+  });
+}
+
+function gsPoll(jid, el, done = () => { }) {
+  const tick = async () => {
+    if (!el.isConnected) return;
+    let j; try { j = await api(`/api/decks/jobs/${jid}`); } catch (e) { el.innerHTML = `<div class="notice bad small">${esc(e.message)}</div>`; return; }
+    if (j.state === "working") { el.innerHTML = `<div class="small"><span class="spin"></span> ${esc(j.step)}</div>`; setTimeout(tick, 1500); return; }
+    if (j.state === "error") { el.innerHTML = `<div class="notice bad small">${esc(j.error)}</div>`; return; }
+    const flags = j.flags || [];
+    el.innerHTML = `<div class="notice ok small">Done.</div>
+      ${j.deck ? `<div class="row" style="margin:6px 0"><a class="btn primary small" href="${esc(j.deck.url)}" target="_blank">Open in Google Slides</a><span class="small muted">${esc(j.deck.account)} · ${j.deck.slides === 1 ? "1 slide" : j.deck.slides + " slides"} · in A.F.R.A Decks</span></div>` : ""}
+      ${j.pptx ? `<div class="small" style="margin:6px 0"><b>PowerPoint:</b> <code style="word-break:break-all">${esc(j.pptx.path)}</code><br><span class="muted">${esc(j.pptx.note)}</span>
+        <div class="row" style="margin-top:6px"><button class="btn small" data-gdl="${esc(j.pptx.id)}">Download .pptx</button></div></div>` : ""}
+      ${flags.length ? `<div class="small" style="margin-top:8px"><b>Check these slides</b><ul style="margin:4px 0;padding-left:18px">${flags.slice(0, 25).map((f) => `<li>${f.slide ? `Slide ${f.slide}: ` : ""}${esc(f.issue)}</li>`).join("")}</ul></div>` : ""}`;
+    $$("[data-gdl]", el).forEach((b) => b.onclick = () => busy(b, () => gsDownload(b.dataset.gdl, "pptx")));
+    done(j);
+  };
+  tick();
+}
+async function gsDownload(id, fmt) {
+  const r = await api(`/api/decks/${encodeURIComponent(id)}/export?fmt=${fmt}`);
+  const cd = r.headers.get("content-disposition") || "", m = cd.match(/filename\*=UTF-8''([^;]+)/);
+  download(await r.blob(), m ? decodeURIComponent(m[1]) : `deck.${fmt}`);
+}
+
+VIEWS.gslides = async () => {
+  main().innerHTML = `<div class="page-head"><div><h1>Slides</h1><p>Turn readings, documents and notes into a presentation: an outline you edit, then the slides, built as <b>Google Slides</b> in your Drive and/or an editable <b>PowerPoint</b> file, in a design you choose.</p></div><div class="row"><a class="btn primary" href="#create">Create into PPT</a><span id="gschip"></span></div></div>
+  ${needLLM()}
+  <div class="tabs" id="gstabs">${[["new", "New deck"], ["designs", "Designs"], ["decks", "My decks"], ["ppt", "PowerPoint files"], ["acc", "Google accounts"]].map(([k, v]) => `<button data-t="${k}" class="${k === GS.tab ? "active" : ""}">${v}</button>`).join("")}</div>
+  <div id="gsbody"></div>`;
+  const chip = async () => {
+    try { await gsInfo(); } catch { return; }
+    const bad = GS.info.accounts.filter((a) => a.needs_reconnect);
+    $("#gschip").innerHTML = bad.length ? `<button class="btn small primary" id="gsrec">Reconnect ${esc(bad[0].email)}</button>` : "";
+    const b = $("#gsrec"); if (b) b.onclick = () => busy(b, async () => { await gsConnect(bad[0].email); chip(); });
+  };
+  chip();
+  const tabs = { new: gsNew, designs: gsDesigns, decks: gsDecks, ppt: gsPpt, acc: (el) => { el.innerHTML = `<div class="card"><div id="gsacc" class="small muted">Checking…</div></div>`; gsAccounts($("#gsacc"), chip); } };
+  const show = (k) => { GS.tab = k; $$("#gstabs button").forEach((x) => x.classList.toggle("active", x.dataset.t === k)); tabs[k]($("#gsbody")); };
+  $$("#gstabs button").forEach((b) => b.onclick = () => show(b.dataset.t));
+  show(GS.tab);
+};
+
+async function gsNew(el) {
+  const [docs, dl] = await Promise.all([api(`/api/projects/${S.project.id}/documents`).catch(() => []), gsDesignList(), gsInfo().catch(() => null)]);
+  const live = gsLive();
+  el.innerHTML = `<div class="split"><div>
+    <div class="card"><h3>1 · What the talk is about</h3>
+      <label class="f">Title <small>(leave empty to let the AI suggest one)</small></label><input type="text" id="gtitle">
+      <label class="f">Topic or key message</label><textarea id="gtopic" rows="2"></textarea>
+      <div class="grid g3" style="gap:10px"><div><label class="f">Length</label><select id="gmin"><option value="5">5 min (~6 slides)</option><option value="10" selected>10 min (~10)</option><option value="20">20 min (~16)</option></select></div>
+        <div><label class="f">Tone</label><select id="gtone"><option value="academic">Academic</option><option value="punchy">Punchy</option></select></div>
+        <div><label class="f">Language</label><select id="glang"><option value="">Same as material</option><option>English</option><option>Indonesian</option></select></div></div>
+      <label class="f">Audience</label><input type="text" id="gaud" placeholder="e.g. thesis committee, class, conference session">
+      <label class="row small" style="margin-top:8px;gap:6px"><input type="checkbox" id="gnotes" checked> Speaker notes</label></div>
+    <div class="card"><h3>2 · Readings and material</h3>
+      <label class="f">A.F.R.A document</label><select id="gdoc"><option value="">(none)</option>${docs.map((d) => `<option value="${esc(d.id)}">${esc(d.title)}</option>`).join("")}</select>
+      <label class="row small" style="margin-top:8px;gap:6px"><input type="checkbox" id="glib"> Use papers from the project library <span class="muted">(cited as [@key])</span></label>
+      <input type="text" id="gkeys" placeholder="only these cite keys (optional, comma separated)" style="margin-top:4px">
+      <label class="f">Files <small>(PDF, DOCX, TXT, MD: readings, a paper, lecture notes)</small></label><input type="file" id="gfile" multiple accept=".pdf,.docx,.txt,.md,.markdown">
+      <div id="gmats" class="small" style="margin-top:4px">${GS.materials.map((m) => `<span class="pill gray">${esc(m.name)}</span> `).join("")}</div>
+      <label class="f">Notes <small>(paste anything: an abstract, bullet notes, a summary)</small></label><textarea id="gpaste" rows="4"></textarea>
+      <label class="f">Numbers from a Google Sheet <small>${live.length ? "(link, or upload .xlsx/.csv: it becomes a Sheet so charts can be linked)" : "(connect Google first)"}</small></label>
+      <div class="row"><input type="text" id="gsheet" class="grow" placeholder="https://docs.google.com/spreadsheets/d/…" ${live.length ? "" : "disabled"}><button class="btn small" id="gsread" ${live.length ? "" : "disabled"}>Read</button>
+        <label class="btn small ghost" style="cursor:pointer">Upload<input type="file" id="gsup" accept=".xlsx,.csv" hidden ${live.length ? "" : "disabled"}></label></div>
+      <div id="gsheetinfo" class="small muted" style="margin-top:4px">${GS.sheet ? `Sheet: ${esc(GS.sheet.title)}` : ""}</div>
+      <label class="f">Picture links <small>(optional, one per line, for figure slides)</small></label><textarea id="gimgs" rows="2"></textarea></div>
+    <div class="card"><h3>3 · Design</h3><div class="dgal small-gal" id="gpick">${dl.designs.map((d) => gsCard(d, true)).join("")}</div>
+      <div class="small muted" style="margin-top:6px">More designs (Slidesgo links, your own .pptx, a Google Slides deck) under <a href="#gslides" id="gtodes">Designs</a>.</div></div>
+  </div><div>
+    <div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">4 · Outline</h3><button class="btn primary" id="gout">${GS.outline ? "Write again" : "Write outline"}</button></div>
+      <div id="goutl" style="margin-top:10px"></div></div>
+    <div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">5 · Slides</h3><button class="btn primary" id="gcont" ${GS.outline ? "" : "disabled"}>Write slides</button></div>
+      <div id="gconts" style="margin-top:10px"></div></div>
+    <div class="card"><h3>6 · Build</h3>
+      <label class="row small" style="gap:6px"><input type="checkbox" id="tg" ${live.length ? "checked" : "disabled"}> Google Slides ${live.length ? "" : `<span class="muted">(<a href="#gslides" id="gtoacc">connect a Google account</a>)</span>`}</label>
+      ${live.length > 1 ? `<select id="gacct" style="margin:4px 0 0 22px;width:auto">${live.map((a) => `<option ${a.default ? "selected" : ""}>${esc(a.email)}</option>`).join("")}</select>` : ""}
+      <label class="row small" style="gap:6px;margin-top:6px"><input type="checkbox" id="tp" checked> PowerPoint (.pptx) <span class="muted">${GS.info?.drive_folder ? "→ My Drive › A.F.R.A Decks (Drive for desktop)" : "→ saved on this computer"}</span></label>
+      <div class="row" style="margin-top:10px"><button class="btn primary" id="gbuild" ${GS.content ? "" : "disabled"}>Build deck</button></div>
+      <div id="gjob" style="margin-top:10px"></div></div>
+  </div></div>`;
+  const body = () => ({
+    project_id: S.project.id, title: $("#gtitle").value.trim(), topic: $("#gtopic").value.trim(), minutes: +$("#gmin").value, tone: $("#gtone").value,
+    language: $("#glang").value, audience: $("#gaud").value.trim(), notes: $("#gnotes").checked, document_id: $("#gdoc").value,
+    use_library: $("#glib").checked, keys: $("#gkeys").value.split(/[,\s]+/).map((k) => k.replace(/^@/, "")).filter(Boolean),
+    materials: GS.materials.map((m) => m.id), pasted: $("#gpaste").value, sheet: GS.sheet, images: $("#gimgs").value.split(/\s+/).filter(Boolean),
+  });
+  $("#gtodes").onclick = (e) => { e.preventDefault(); $('#gstabs button[data-t="designs"]').click(); };
+  const acc = $("#gtoacc"); if (acc) acc.onclick = (e) => { e.preventDefault(); $('#gstabs button[data-t="acc"]').click(); };
+  $$("#gpick .dcard").forEach((c) => c.onclick = () => { GS.design = c.dataset.did; $$("#gpick .dcard").forEach((x) => x.classList.toggle("sel", x === c)); });
+  $("#gfile").onchange = async (e) => {
+    for (const f of e.target.files) {
+      const fd = new FormData(); fd.append("file", f);
+      try { GS.materials.push(await api("/api/decks/materials", { body: fd })); } catch (err) { toast(err.message, "bad"); }
+    }
+    $("#gmats").innerHTML = GS.materials.map((m) => `<span class="pill gray">${esc(m.name)}</span> `).join("") + (GS.materials.length ? `<a href="#gslides" id="gmclr" class="small">clear</a>` : "");
+    const clr = $("#gmclr"); if (clr) clr.onclick = (ev) => { ev.preventDefault(); GS.materials = []; $("#gmats").innerHTML = ""; };
+    e.target.value = "";
+  };
+  const sheetShown = (s) => { GS.sheet = s; const n = s.tabs.reduce((a, t) => a + t.charts.length, 0); $("#gsheetinfo").textContent = `Sheet "${s.title}": ${s.values.length} rows read, ${n} chart${n === 1 ? "" : "s"} the slides can link.`; };
+  $("#gsread").onclick = (e) => busy(e.currentTarget, async () => sheetShown(await api("/api/google/sheets/read", { body: { link: $("#gsheet").value, account: $("#gacct")?.value || "" } })));
+  $("#gsup").onchange = async (e) => {
+    const fd = new FormData(); fd.append("file", e.target.files[0]);
+    $("#gsheetinfo").innerHTML = `<span class="spin"></span> Uploading to A.F.R.A Decks as a Google Sheet…`;
+    try { sheetShown(await api(`/api/google/sheets/upload?account=${encodeURIComponent($("#gacct")?.value || "")}`, { body: fd })); } catch (err) { $("#gsheetinfo").textContent = err.message; }
+  };
+  const drawOutline = () => {
+    const o = GS.outline; if (!o) { $("#goutl").innerHTML = `<div class="small muted">Add material on the left, then click <b>Write outline</b>. You can change every line before the slides are written.</div>`; return; }
+    $("#goutl").innerHTML = `<input type="text" id="gotitle" value="${esc(o.title)}" style="font-weight:600">
+      ${o.slides.map((s, i) => `<div class="orow"><span class="small muted">${i + 1}</span><select data-ol="${i}">${GLAYOUTS.map((l) => `<option ${l === s.layout ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <div class="grow"><input type="text" data-ot="${i}" value="${esc(s.title)}"><input type="text" data-og="${i}" value="${esc(s.goal)}" class="small" placeholder="what this slide must say"></div>
+        <div class="col"><button data-oup="${i}" title="Move up">↑</button><button data-odel="${i}" title="Remove">×</button></div></div>`).join("")}
+      <button class="btn small ghost" id="goadd">+ Add slide</button>`;
+    $("#gotitle").oninput = (e) => o.title = e.target.value;
+    $$("[data-ol]").forEach((x) => x.onchange = () => o.slides[+x.dataset.ol].layout = x.value);
+    $$("[data-ot]").forEach((x) => x.oninput = () => o.slides[+x.dataset.ot].title = x.value);
+    $$("[data-og]").forEach((x) => x.oninput = () => o.slides[+x.dataset.og].goal = x.value);
+    $$("[data-oup]").forEach((x) => x.onclick = () => { const i = +x.dataset.oup; if (i) { [o.slides[i - 1], o.slides[i]] = [o.slides[i], o.slides[i - 1]]; drawOutline(); } });
+    $$("[data-odel]").forEach((x) => x.onclick = () => { o.slides.splice(+x.dataset.odel, 1); drawOutline(); });
+    $("#goadd").onclick = () => { o.slides.splice(Math.max(0, o.slides.length - 1), 0, { layout: "content", title: "", goal: "" }); drawOutline(); };
+  };
+  const drawContent = () => {
+    const c = GS.content; if (!c) { $("#gconts").innerHTML = `<div class="small muted">The AI writes each slide from the outline: short bullets, tables from your numbers, speaker notes. Slides that would overflow are split.</div>`; return; }
+    $("#gconts").innerHTML = `${c.missing?.length ? `<div class="notice small">Cited but not in the library (left as written): ${c.missing.map(esc).join(", ")}</div>` : ""}
+      ${(c.flags || []).length ? `<div class="small muted" style="margin-bottom:6px">${c.flags.map((f) => esc(f.issue)).join(" · ")}</div>` : ""}
+      ${c.slides.map((s, i) => `<details class="srow"><summary><span class="pill gray">${esc(s.layout)}</span> <b>${i + 1}. ${esc(s.title)}</b></summary>
+        <input type="text" data-ct="${i}" value="${esc(s.title)}">
+        ${["content", "references", "title", "section", "closing"].includes(s.layout) ? `<textarea data-cb="${i}" rows="${Math.min(8, Math.max(2, s.bullets.length + 1))}" placeholder="${s.layout === "content" || s.layout === "references" ? "one bullet per line" : "subtitle"}">${esc(s.layout === "content" || s.layout === "references" ? s.bullets.join("\n") : s.subtitle)}</textarea>` : ""}
+        ${s.layout === "two_column" ? `<div class="small muted">${esc(s.left.heading)}: ${s.left.bullets.map(esc).join("; ")} | ${esc(s.right.heading)}: ${s.right.bullets.map(esc).join("; ")}</div>` : ""}
+        ${s.layout === "table" ? `<div class="small muted">Table: ${esc(s.table.header.join(" | "))} (${s.table.rows.length} rows)</div>` : ""}
+        ${s.notes ? `<textarea data-cn="${i}" rows="3" class="small" placeholder="speaker notes">${esc(s.notes)}</textarea>` : ""}</details>`).join("")}`;
+    $$("[data-ct]").forEach((x) => x.oninput = () => c.slides[+x.dataset.ct].title = x.value);
+    $$("[data-cb]").forEach((x) => x.oninput = () => { const s = c.slides[+x.dataset.cb]; if (s.layout === "content" || s.layout === "references") s.bullets = x.value.split("\n").map((b) => b.trim()).filter(Boolean); else s.subtitle = x.value; });
+    $$("[data-cn]").forEach((x) => x.oninput = () => c.slides[+x.dataset.cn].notes = x.value);
+  };
+  drawOutline(); drawContent();
+  $("#gout").onclick = (e) => busy(e.currentTarget, async () => {
+    GS.outline = await api("/api/decks/outline", { body: body() }); GS.content = null;
+    if (!$("#gtitle").value) $("#gtitle").value = GS.outline.title || "";
+    drawOutline(); drawContent(); $("#gcont").disabled = false; $("#gbuild").disabled = true;
+  });
+  $("#gcont").onclick = (e) => busy(e.currentTarget, async () => {
+    if (!GS.outline?.slides.length) return toast("Write the outline first");
+    GS.content = await api("/api/decks/content", { body: { ...body(), outline: GS.outline } });
+    drawContent(); $("#gbuild").disabled = false;
+  });
+  $("#gbuild").onclick = (e) => busy(e.currentTarget, async () => {
+    const targets = [...($("#tg").checked ? ["google"] : []), ...($("#tp").checked ? ["pptx"] : [])];
+    if (!targets.length) return toast("Tick Google Slides and/or PowerPoint");
+    const r = await api("/api/decks/build", { body: { slides: GS.content.slides, title: GS.outline?.title || $("#gtitle").value, design_id: GS.design, targets,
+      account: $("#gacct")?.value || "", project_id: S.project.id, notes: $("#gnotes").checked, missing: GS.content.missing || [] } });
+    gsPoll(r.job, $("#gjob"));
+  });
+}
+
+// ---- the design picker and the template-link importer. Used by the Designs page and Tugas › New deck; the deck wizard can call them too.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const IMP_OK = new Set(["saved", "rebuilt", "added"]);
+const impShort = (u) => u.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60);
+function impRows(j) {
+  return j.items.map((i) => {
+    const tag = i.state === "done" ? (IMP_OK.has(i.status) ? `<span class="pill ok">${i.status === "rebuilt" ? "Rebuilt" : "Added"}</span>` : `<span class="pill warn">Not imported</span>`)
+      : i.state === "working" ? `<span class="spin"></span>` : `<span class="pill gray">Waiting</span>`;
+    return `<div class="tg-info small" style="margin:4px 0;padding:6px 10px">${tag} <b>${esc(i.name || impShort(i.url))}</b> <span class="muted">${esc(i.step || i.message || "")}</span></div>`;
+  }).join("");
+}
+async function designImport(text, out) {  // links (one per line) -> the Designs folder; shows one line per link while it works
+  const { job } = await api("/api/designs/import", { body: { links: text } });
+  for (; ;) {
+    const j = await api("/api/designs/import/" + job);
+    out.innerHTML = impRows(j);
+    if (j.state === "done") return j;
+    await sleep(1200);
+  }
+}
+function pdCard(d, sel) {
+  return `<div class="dcard${sel ? " sel" : ""}" data-did="${esc(d.id)}" title="${esc(d.name)}"><img src="/api/designs/${encodeURIComponent(d.id)}/thumb?v=${Math.round(d.added || 0)}" alt="" loading="lazy">
+    <div class="dmeta"><div class="t">${esc(d.name)}</div><div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)}</div></div></div>`;
+}
+// pickDesign({selected, title, button}) -> Promise of the chosen design (the /api/designs record), or null when cancelled
+function pickDesign(opts = {}) {
+  return new Promise((resolve) => {
+    let list = [], chosen = opts.selected || "", done = false;
+    const finish = (v) => { if (done) return; done = true; closeModal(); resolve(v); };
+    const box = modal(`<h2>${esc(opts.title || "Pick a design")}</h2><input type="text" id="pdq" placeholder="Filter designs…">
+      <div class="scroll" style="max-height:44vh;margin-top:8px"><div class="dgal small-gal" id="pdgal"><div class="small muted">Loading…</div></div></div>
+      <details style="margin-top:10px"><summary class="small">Add free templates from links</summary>
+        <textarea id="pdlinks" rows="3" placeholder="One link per line: Slidesgo, SlidesCarnival, Microsoft templates, a public Google Slides deck" style="margin-top:6px"></textarea>
+        <div class="row" style="margin-top:6px"><button class="btn small" id="pdadd">Add</button></div><div id="pdres" style="margin-top:6px"></div></details>
+      <div class="modal-foot"><button class="btn" id="pdx">Cancel</button><button class="btn primary" id="pdok">${esc(opts.button || "Use this design")}</button></div>`, true);
+    const paint = () => {
+      const q = $("#pdq", box).value.toLowerCase();
+      $("#pdgal", box).innerHTML = list.filter((d) => d.name.toLowerCase().includes(q)).map((d) => pdCard(d, d.id === chosen)).join("") || '<div class="small muted">No design matches.</div>';
+      $$(".dcard", box).forEach((c) => { c.onclick = () => { chosen = c.dataset.did; paint(); }; c.ondblclick = () => finish(list.find((d) => d.id === chosen)); });
+    };
+    const load = async () => {
+      list = (await api("/api/designs")).designs;
+      if (!list.some((d) => d.id === chosen)) chosen = (list.find((d) => d.default) || list[0] || {}).id || "";
+      paint();
+    };
+    load().catch((e) => { toast(e.message, "bad"); finish(null); });
+    $("#pdq", box).oninput = paint;
+    $("#pdx", box).onclick = () => finish(null);
+    $("#pdok", box).onclick = () => finish(list.find((d) => d.id === chosen) || null);
+    $("#pdadd", box).onclick = (e) => busy(e.currentTarget, async () => {
+      if (!$("#pdlinks", box).value.trim()) return toast("Paste at least one link");
+      await designImport($("#pdlinks", box).value, $("#pdres", box));
+      await load();
+    });
+  });
+}
+
+async function gsDesigns(el) {
+  const [dl, fold] = await Promise.all([gsDesignList(), api("/api/designs/folder")]), live = gsLive();
+  el.innerHTML = `<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;gap:10px"><div><h3 style="margin:0">Designs folder</h3>
+      <div class="small muted" style="margin-top:4px">Drop any .pptx files in <code>${esc(fold.path)}</code>: each one becomes a design here, with its picture, by itself. <b>${fold.count}</b> file${fold.count === 1 ? "" : "s"} in it now. Change the folder under Settings.</div></div>
+      <button class="btn" id="dopenf">Open Designs folder</button></div></div>
+    <div class="grid g3" style="gap:12px;margin-bottom:12px">
+    <div class="card" style="margin:0"><h3>Add from links</h3><p class="small muted" style="margin-top:0">One or several links, one per line, to <b>free</b> templates: Slidesgo, SlidesCarnival, Microsoft templates, a public Google Slides deck or any template page. A.F.R.A saves the template's own free .pptx into the Designs folder, with its credit. It never signs in and skips paid templates.</p>
+      <textarea id="dlinks" rows="4" placeholder="https://slidesgo.com/theme/…&#10;https://docs.google.com/presentation/d/…"></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn primary small" id="dadd">Add designs</button></div><div id="dres" class="small" style="margin-top:6px"></div></div>
+    <div class="card" style="margin:0"><h3>Add a PowerPoint</h3><p class="small muted" style="margin-top:0">A .pptx template or any deck you like; it is also saved in the Designs folder. A.F.R.A takes its colours and fonts; in Google Slides it also keeps its real layouts.</p>
+      <input type="file" id="dpptx" accept=".pptx"></div>
+    <div class="card" style="margin:0"><h3>From colours</h3><input type="text" id="dcname" placeholder="Name">
+      <input type="text" id="dccols" placeholder="#14213D, #FFC857, #3C7DC4" style="margin-top:6px"><input type="text" id="dcfonts" placeholder="Fonts: Georgia, Arial" style="margin-top:6px">
+      <div class="row" style="margin-top:8px"><button class="btn small" id="dcadd">Save design</button></div></div></div>
+    <div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Your designs</h3><button class="btn small ghost" id="drest">Restore A.F.R.A designs</button></div>
+      <div class="dgal" style="margin-top:10px">${dl.designs.map((d) => gsCard(d, false)).join("")}</div>
+      <div class="small muted" style="margin-top:8px">${esc(dl.how)}</div></div>`;
+  const again = () => gsDesigns(el);
+  $("#dadd").onclick = (e) => busy(e.currentTarget, async () => {
+    const txt = $("#dlinks").value;
+    if (/docs\.google\.com\/presentation/.test(txt) && !live.length) toast("Google Slides links need a connected Google account; the other links are added now");
+    if (!txt.trim()) return toast("Paste at least one link");
+    const j = await designImport(txt, $("#dres"));
+    const n = j.items.filter((i) => IMP_OK.has(i.status) || i.name).length;
+    await again();
+    $("#dres").innerHTML = impRows(j);
+    toast(`${n} design${n === 1 ? "" : "s"} added`, n ? "ok" : "");
+  });
+  $("#dopenf").onclick = (e) => busy(e.currentTarget, () => api("/api/designs/folder/open", { method: "POST" }));
+  $("#dpptx").onchange = async (e) => {
+    const fd = new FormData(); fd.append("file", e.target.files[0]);
+    try { const d = await api("/api/designs/pptx", { body: fd }); toast(`Added "${d.name}"`, "ok"); again(); } catch (err) { toast(err.message, "bad"); }
+  };
+  $("#dcadd").onclick = (e) => busy(e.currentTarget, async () => {
+    const cols = $("#dccols").value.match(/#?[0-9a-f]{6}\b/gi) || [];
+    if (cols.length < 2) return toast("Give at least two colours like #14213D");
+    await api("/api/designs/colors", { body: { name: $("#dcname").value, colors: cols.map((c) => c.startsWith("#") ? c : "#" + c), fonts: $("#dcfonts").value.replace(/^fonts?:/i, "").split(",").map((f) => f.trim()).filter(Boolean) } });
+    again();
+  });
+  $("#drest").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/designs/restore", { method: "POST" }); again(); });
+  $$("[data-dren]").forEach((b) => b.onclick = async () => { const d = dl.designs.find((x) => x.id === b.dataset.dren); const n = prompt("New name", d.name); if (n && n.trim()) { await api(`/api/designs/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n.trim() } }); again(); } });
+  $$("[data-ddef]").forEach((b) => b.onclick = () => busy(b, async () => { await api(`/api/designs/${encodeURIComponent(b.dataset.ddef)}`, { method: "PATCH", body: { default: true } }); GS.design = b.dataset.ddef; again(); }));
+  $$("[data-ddel]").forEach((b) => b.onclick = () => { const d = dl.designs.find((x) => x.id === b.dataset.ddel); if (confirm(`Delete the design "${d.name}"?${d.in_folder ? " Its .pptx file in the Designs folder goes to the Recycle Bin." : ""}${d.accounts.length ? " Its Google template copies go to the Drive bin." : ""}`)) busy(b, async () => { await api(`/api/designs/${encodeURIComponent(d.id)}`, { method: "DELETE" }); if (GS.design === d.id) GS.design = ""; again(); }); });
+}
+
+async function gsDecks(el) {
+  const [r, dl] = await Promise.all([api("/api/decks"), gsDesignList()]);
+  el.innerHTML = `<div class="card">${r.decks.length ? r.decks.map((d) => `<div class="list-item" style="cursor:default"><div class="row" style="justify-content:space-between;flex-wrap:wrap">
+      <div><div class="t">${esc(d.name)}</div><div class="small muted">${d.account ? `Google Slides · ${esc(d.account)}` : d.in_drive ? "PowerPoint · in your Drive folder" : "PowerPoint · on this computer"} · ${d.slides === 1 ? "1 slide" : (d.slides || "?") + " slides"} · ${esc(d.template_name || d.source || "")} · ${ago(d.created)}
+        ${(d.flags || []).length ? ` · <span class="pill warn">${d.flags.length} to check</span>` : ""}</div>
+        ${d.path ? `<div class="small muted" style="word-break:break-all">${esc(d.path)}</div>` : ""}</div>
+      <div class="row" style="gap:4px;flex-wrap:wrap">${d.url ? `<a class="btn small primary" href="${esc(d.url)}" target="_blank">Open</a>` : ""}
+        <button class="btn small" data-xp="${esc(d.id)}">.pptx</button>${d.account ? `<button class="btn small" data-xf="${esc(d.id)}">PDF</button><button class="btn small ghost" data-xe="${esc(d.id)}">Edit slides</button>` : ""}
+        ${d.rebuild ? `<button class="btn small ghost" data-xr="${esc(d.id)}">Change design</button>` : ""}<button class="btn small ghost" data-xd="${esc(d.id)}">Forget</button></div></div>
+      <div data-xjob="${esc(d.id)}"></div></div>`).join("") : `<div class="empty">No decks yet. Make one under <b>New deck</b>.</div>`}</div>`;
+  $$("[data-xp]").forEach((b) => b.onclick = () => busy(b, () => gsDownload(b.dataset.xp, "pptx")));
+  $$("[data-xf]").forEach((b) => b.onclick = () => busy(b, () => gsDownload(b.dataset.xf, "pdf")));
+  $$("[data-xd]").forEach((b) => b.onclick = async () => { if (confirm("Forget this deck in A.F.R.A? The file itself stays where it is.")) { await api(`/api/decks/${encodeURIComponent(b.dataset.xd)}`, { method: "DELETE" }); gsDecks(el); } });
+  $$("[data-xr]").forEach((b) => b.onclick = () => {
+    const box = modal(`<h3 style="margin-top:0">Same slides, another design</h3><div class="dgal small-gal">${dl.designs.map((d) => gsCard(d, true)).join("")}</div>
+      <div class="row" style="margin-top:10px"><button class="btn primary" id="rsgo">Build a new copy</button><button class="btn ghost" id="rsx">Cancel</button></div>`, true);
+    let pick = GS.design;
+    $$(".dcard", box).forEach((c) => c.onclick = () => { pick = c.dataset.did; $$(".dcard", box).forEach((x) => x.classList.toggle("sel", x === c)); });
+    $("#rsx", box).onclick = closeModal;
+    $("#rsgo", box).onclick = (e) => busy(e.currentTarget, async () => {
+      const j = await api(`/api/decks/${encodeURIComponent(b.dataset.xr)}/restyle`, { body: { design_id: pick } }); closeModal();
+      gsPoll(j.job, $(`[data-xjob="${CSS.escape(b.dataset.xr)}"]`, el), () => setTimeout(() => el.isConnected && GS.tab === "decks" && gsDecks(el), 8000));
+    });
+  });
+  $$("[data-xe]").forEach((b) => b.onclick = async () => {
+    const d = await api(`/api/decks/${encodeURIComponent(b.dataset.xe)}`);
+    const box = modal(`<h3 style="margin-top:0">${esc(d.name)}</h3><p class="small muted" style="margin-top:0">Changes go straight into the Google Slides deck.</p>
+      ${d.slides.map((s, i) => `<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0"><span class="small"><b>${i + 1}.</b> ${esc(s.content?.title || "")}</span>
+        <span class="row" style="gap:4px"><button class="btn small ghost" data-rd="${i}" data-act="shorter">Shorter</button><button class="btn small ghost" data-rd="${i}" data-act="rewrite">Rewrite</button></span></div>`).join("")}
+      <div class="row" style="margin-top:10px"><a class="btn primary" href="${esc(d.url)}" target="_blank">Open deck</a><button class="btn ghost" id="edx">Close</button></div>`, true);
+    $("#edx", box).onclick = closeModal;
+    $$("[data-rd]", box).forEach((x) => x.onclick = () => busy(x, async () => { await api(`/api/decks/${encodeURIComponent(d.id)}/redo`, { body: { index: +x.dataset.rd, action: x.dataset.act } }); x.textContent = "✓ done"; }));
+  });
+}
+
+async function gsPpt(el) {
+  const r = await api("/api/google/pptmaster"), live = gsLive();
+  el.innerHTML = `<div class="card"><p class="small muted" style="margin-top:0">PowerPoint files (for example decks PPT Master made in <code>${esc(r.folder)}</code>) can become Google Slides in your Drive's <b>A.F.R.A Decks</b> folder. Google converts them; most designs survive, some effects don't.</p>
+    ${live.length ? "" : `<div class="notice small">Connect a Google account under <b>Google accounts</b> first.</div>`}
+    <div class="row"><label class="btn small" style="cursor:pointer">Upload a .pptx to convert<input type="file" id="pup" accept=".pptx" hidden ${live.length ? "" : "disabled"}></label><span id="pupres" class="small"></span></div>
+    <div style="margin-top:10px">${r.files.length ? r.files.map((f, i) => `<div class="list-item" style="cursor:default"><div class="row" style="justify-content:space-between;flex-wrap:wrap">
+      <div><div class="t">${esc(f.name)}</div><div class="small muted">${esc(f.folder)} · ${Math.round(f.size / 1024)} KB · ${ago(f.modified)}</div></div>
+      <div class="row" style="gap:4px">${f.google ? `<a class="btn small" href="${esc(f.google.url)}" target="_blank">Open in Slides</a>` : ""}<button class="btn small primary" data-pc="${i}" ${live.length ? "" : "disabled"}>${f.google ? "Convert again" : "To Google Slides"}</button></div></div></div>`).join("")
+      : `<div class="small muted">No .pptx files in that folder yet.</div>`}</div></div>`;
+  const done = (x) => `<a href="${esc(x.url)}" target="_blank">Open "${esc(x.name)}" in Google Slides</a>`;
+  $$("[data-pc]").forEach((b) => b.onclick = () => busy(b, async () => { const x = await api("/api/google/pptx-to-slides", { body: { path: r.files[+b.dataset.pc].path } }); toast("Converted", "ok"); b.closest(".list-item").insertAdjacentHTML("beforeend", `<div class="small">${done(x)}</div>`); }));
+  $("#pup").onchange = async (e) => {
+    const fd = new FormData(); fd.append("file", e.target.files[0]);
+    $("#pupres").innerHTML = `<span class="spin"></span> Converting…`;
+    try { $("#pupres").innerHTML = done(await api("/api/google/pptx-upload", { body: fd })); } catch (err) { $("#pupres").textContent = err.message; }
+  };
+}
+
 // ================================================================== SETTINGS
 const PRESETS = {
   openrouter: { provider: "openai", base: "https://openrouter.ai/api/v1", model: "anthropic/claude-sonnet-5.5", fast: "google/gemini-3.8-flash", note: "Recommended: one key, every model, exact cost tracking. openrouter.ai/keys" },
@@ -1742,8 +2137,13 @@ VIEWS.settings = async () => {
   const s = S.settings = await api("/api/settings");
   main().innerHTML = `<div class="page-head"><div><h1>Settings</h1><p>Stored locally in <code>data/settings.json</code>. Nothing leaves your computer except calls to the AI and search providers you choose.</p></div></div>
   <div class="card" style="margin-bottom:16px"><h3>How A.F.R.A uses AI</h3><div id="claudeBox" class="small muted">Checking…</div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Tugas folder</h3><p class="small muted" style="margin-top:0">Where the folders of the <a href="#tugas">Tugas</a> page live on this computer. Leave empty for <code>Documents/A.F.R.A Tugas</code>. Existing folders are not moved: copy them across yourself when you change this.</p><div class="row"><input type="text" id="s_tugas_dir" class="grow" value="${esc(s.tugas_dir || "")}" placeholder="e.g. D:/Kuliah/Tugas"><button class="btn primary" id="savetg">Save</button></div>
+    <h3 style="margin-top:16px">Designs folder</h3><p class="small muted" style="margin-top:0">Any .pptx in this folder (subfolders too) shows up as a design on the Slides page and in <b>New deck</b>. Leave empty for the <code>_Designs</code> folder inside the Tugas folder. <span id="dfcount"></span></p>
+    <div class="row"><input type="text" id="s_designs_dir" class="grow" value="${esc(s.designs_dir || "")}" placeholder="e.g. D:/Kuliah/Designs"><button class="btn" id="opendf">Open Designs folder</button></div>
+    <label class="f">Model that reads template previews <small>(only when a template has no .pptx to download; needs an OpenRouter key)</small></label><input type="text" id="s_template_vision_model" value="${esc(s.template_vision_model || "")}" placeholder="z-ai/glm-4.5v"></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Google Slides and Drive</h3><p class="small muted" style="margin-top:0">Decks are made under <a href="#gslides">Slides</a>. Connect one or more Google accounts here or there.</p><div id="googleBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>ResearchStudio <small class="muted">idea cards, posters, blogs</small></h3><div id="studioBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Use on your phone</h3><div id="phoneBox" class="small muted">Checking…</div></div>
   <div class="grid g2">
@@ -1863,7 +2263,10 @@ VIEWS.settings = async () => {
   };
   const doSave = async (quiet) => { S.settings = await api("/api/settings", { method: "PUT", body: collect() }); renderLLMStatus(); if (quiet !== true) toast("Settings saved", "ok"); };
   $("#save1").onclick = async () => { await doSave(); loadModels(true); };
-  $("#save2").onclick = $("#save3").onclick = doSave;
+  $("#save2").onclick = $("#save3").onclick = $("#savetg").onclick = doSave;
+  const dfCount = () => api("/api/designs/folder").then((f) => { $("#dfcount").textContent = `${f.count} .pptx file${f.count === 1 ? "" : "s"} in ${f.path}`; }).catch(() => { });
+  dfCount();
+  $("#opendf").onclick = (e) => busy(e.currentTarget, async () => { await doSave(true); await api("/api/designs/folder/open", { method: "POST" }); dfCount(); });
   $("#test").onclick = (e) => busy(e.currentTarget, async () => {
     await doSave(true); $("#tres").textContent = "";
     try {
@@ -2005,6 +2408,7 @@ VIEWS.settings = async () => {
   };
   api("/api/phone").then(drawPhone).catch(() => { });
   slidesPanel($("#slidesBox"), "");
+  gsAccounts($("#googleBox")).catch((e) => { $("#googleBox").textContent = e.message; });
   studioPanel($("#studioBox"));
   $("#pimp").onchange = async (e) => {
     const fd = new FormData(); fd.append("file", e.target.files[0]); toast("Importing project…");
@@ -2017,6 +2421,263 @@ VIEWS.settings = async () => {
     if (prompt(`Type the project name to delete it permanently (library, documents, runs):\n${S.project.name}`) !== S.project.name) return;
     await api(`/api/projects/${S.project.id}`, { method: "DELETE" }); localStorage.removeItem("rt_project"); await loadProjects(); location.hash = "#home";
   };
+};
+
+// ------------------------------------------------------------------ Tugas: Finder-style folders on disk
+const T = { path: "", data: null, tree: null, upcoming: [], sel: new Set(), last: null, query: "", found: null,
+  mode: (() => { try { return localStorage.getItem("rt_tugas_mode") || "grid"; } catch { return "grid"; } })(),
+  open: (() => { try { return new Set(JSON.parse(localStorage.getItem("rt_tugas_open") || "[]")); } catch { return new Set(); } })() };
+const tgUrl = (p) => "#tugas" + (p ? "/" + p.split("/").map(encodeURIComponent).join("/") : "");
+const tgBase = (p) => p.split("/").pop();
+const tgParent = (p) => p.split("/").slice(0, -1).join("/");
+const tgSize = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(1)} GB`;
+const TG_KIND = { pptx: "pptx", ppt: "pptx", key: "pptx", docx: "docx", doc: "docx", odt: "docx", rtf: "docx", pdf: "pdf", png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image", bmp: "image" };
+const TG_LABEL = { pptx: "PPT", docx: "DOC", pdf: "PDF", image: "IMG", other: "FILE" };
+function tgIcon(it) {
+  if (it.kind === "folder") return `<svg class="tg-ico" viewBox="0 0 48 40"><path d="M3 8a3 3 0 0 1 3-3h12l4 5h20a3 3 0 0 1 3 3v21a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z" fill="var(--accent-2)" opacity=".9"/><path d="M3 15h42v18a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z" fill="var(--accent)"/></svg>`;
+  const k = TG_KIND[it.ext] || "other";
+  return `<div class="tg-ico tg-file ${k}"><b>${it.ext && k === "other" ? esc(it.ext.slice(0, 4).toUpperCase()) : TG_LABEL[k]}</b></div>`;
+}
+function tgDue(due) {
+  if (!due) return "";
+  const d = Math.round((Date.parse(due + "T00:00:00") - new Date().setHours(0, 0, 0, 0)) / 864e5);
+  const when = d < 0 ? `${-d} day${d === -1 ? "" : "s"} overdue` : d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`;
+  const date = new Date(due + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return `<span class="pill ${d < 0 ? "bad" : d <= 3 ? "warn" : "gray"}">Due ${date} · ${when}</span>`;
+}
+async function tgLoad(path = T.path, keepSel = false) {
+  const [data, tree, up] = await Promise.all([api("/api/tugas?path=" + encodeURIComponent(path)), api("/api/tugas/tree"), api("/api/tugas/upcoming")]);
+  Object.assign(T, { path: data.path, data, tree, upcoming: up });
+  T.sel = keepSel ? new Set([...T.sel].filter((p) => data.items.some((i) => i.path === p))) : new Set();
+  if (!keepSel) T.last = null;
+  tgRender();
+}
+function tgNode(n, depth) {
+  const kids = n.children || [], open = T.open.has(n.path) || (T.path + "/").startsWith(n.path + "/");
+  return `<div class="tg-node"><div class="tg-row ${n.path === T.path ? "on" : ""}" data-p="${esc(n.path)}" data-drop style="padding-left:${6 + depth * 14}px">
+    <span class="tg-caret ${kids.length ? "" : "none"}" data-toggle="${esc(n.path)}">${open ? "▾" : "▸"}</span><a href="${tgUrl(n.path)}">${esc(n.name)}</a></div>${open && kids.length ? kids.map((k) => tgNode(k, depth + 1)).join("") : ""}</div>`;
+}
+function tgItem(it) {
+  const isF = it.kind === "folder";
+  const meta = isF ? [it.due ? tgDue(it.due) : "", it.linked ? `<span class="pill">${it.linked} linked</span>` : ""].join("") : `<span class="muted">${tgSize(it.size)}</span>`;
+  return `<div class="tg-item ${T.sel.has(it.path) ? "sel" : ""}" draggable="true" data-p="${esc(it.path)}" ${isF ? "data-drop" : ""} title="${esc(it.note || it.name)}">
+    ${tgIcon(it)}<div class="tg-name"><span data-name>${esc(it.name)}</span></div><div class="tg-meta small">${meta}</div>
+    <div class="tg-date small muted">${new Date(it.modified * 1000).toLocaleDateString()}</div></div>`;
+}
+function tgRender() {
+  const d = T.data, items = d.items, atRoot = !T.path;
+  const links = d.links.map((l) => `<span class="pill tg-link"><a href="${l.type === "doc" ? "#docs/" + l.id : "#library"}">${l.type === "doc" ? "Doc" : "Paper"}: ${esc(l.title.slice(0, 60))}</a> <button data-unlink="${l.type}:${l.id}" title="Unlink">×</button></span>`).join(" ");
+  const info = !atRoot ? `<div class="tg-info"><div class="row">${tgDue(d.meta.due) || '<span class="muted small">No due date</span>'}
+      <button class="btn small ghost" data-act="meta">Due date &amp; note</button><button class="btn small ghost" data-act="link">Link doc or paper</button></div>
+      ${d.meta.note ? `<div class="small" style="margin-top:6px;white-space:pre-wrap">${esc(d.meta.note)}</div>` : ""}${links ? `<div class="row" style="margin-top:8px;gap:6px">${links}</div>` : ""}</div>` : "";
+  const soon = atRoot && !T.found && T.upcoming.length ? `<div class="tg-info"><b class="small">Coming up</b>${T.upcoming.slice(0, 6).map((u) => `<div class="tg-up"><a href="${tgUrl(u.path)}">${esc(u.path)}</a> ${tgDue(u.due)}</div>`).join("")}</div>` : "";
+  let body;
+  if (T.found) body = T.found.length ? `<div class="tg-found">${T.found.map((f) => `<div class="tg-hit" data-hit="${esc(f.path)}" data-kind="${f.kind}">${tgIcon(f)}<div><div>${esc(f.name)}</div><div class="small muted">${esc(f.parent || "All Tugas")}</div></div></div>`).join("")}</div>` : `<div class="empty">Nothing named “${esc(T.query)}”.</div>`;
+  else if (!items.length) body = `<div class="empty">${atRoot ? "No folders yet. Make one per mata kuliah, semester, or however you like." : "This folder is empty. Drop files here, or use Upload."}
+    <div class="row" style="justify-content:center;margin-top:12px"><button class="btn primary" data-act="mkdir">New folder</button>${atRoot ? "" : '<button class="btn" data-act="upload">Upload files</button>'}</div></div>`;
+  else body = `<div class="tg-grid ${T.mode}">${T.mode === "list" ? `<div class="tg-item head small muted"><span></span><span>Name</span><span>Info</span><span>Modified</span></div>` : ""}${items.map(tgItem).join("")}</div>`;
+  const crumbs = [`<a href="#tugas" data-p="" data-drop>All Tugas</a>`, ...d.crumbs.map((c) => `<a href="${tgUrl(c.path)}" data-p="${esc(c.path)}" data-drop>${esc(c.name)}</a>`)].join(" <span class='muted'>/</span> ");
+  main().innerHTML = `<div class="page-head"><div><h1>Tugas</h1><p>Folders for every assignment, kept on your computer in <code>${esc(d.root)}</code>. File Explorer and Finder see the same folders.</p></div>
+    <div class="row"><input type="text" id="tgq" placeholder="Search names…" value="${esc(T.query)}" style="width:190px"><button class="btn" data-act="mode" title="Switch grid and list">${T.mode === "grid" ? "List view" : "Grid view"}</button>
+    <button class="btn" data-act="upload">Upload</button>${atRoot ? "" : '<button class="btn" data-act="newdeck">New deck</button>'}<button class="btn primary" data-act="mkdir">New folder</button><input type="file" id="tgfile" multiple hidden></div></div>
+    <div class="tg"><div class="card tg-tree"><div class="tg-row ${!T.path ? "on" : ""}" data-p="" data-drop><span class="tg-caret none"></span><a href="#tugas"><b>All Tugas</b></a></div>${T.tree.children.map((n) => tgNode(n, 0)).join("")}</div>
+    <div class="card tg-main" data-p="${esc(T.path)}"><div class="tg-crumbs">${crumbs}</div><div id="tgselbar" class="tg-info row hidden" style="gap:8px"></div>${info}${soon}${body}</div></div>`;
+  tgWire();
+}
+const tgSelected = () => [...T.sel];
+async function tgDo(fn, ok) {
+  try { const r = await fn(); await tgLoad(T.path, true); if (ok) toast(ok, "ok"); return r; } catch (e) { toast(e.message, "bad"); }
+}
+async function tgUpload(files, to = T.path) {
+  if (!files.length) return;
+  const fd = new FormData(); [...files].forEach((f) => fd.append("files", f, f.name));
+  toast(`Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
+  await tgDo(() => api("/api/tugas/upload?path=" + encodeURIComponent(to), { body: fd }), `Added ${files.length} file${files.length > 1 ? "s" : ""}`);
+}
+function tgNew() {
+  const box = modal(`<h2>New folder</h2><input type="text" id="tgn" placeholder="e.g. Fisika Dasar, Semester 5, Tugas 1" autofocus><div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Create</button></div>`);
+  const go = () => { const name = $("#tgn", box).value; closeModal(); tgDo(() => api("/api/tugas/mkdir", { body: { path: T.path, name } })); };
+  $("#tgx", box).onclick = closeModal; $("#tgok", box).onclick = go; $("#tgn", box).onkeydown = (e) => { if (e.key === "Enter") go(); };
+  setTimeout(() => $("#tgn", box)?.focus(), 30);
+}
+function tgRename(path) {
+  const el = $(`.tg-item[data-p="${CSS.escape(path)}"] [data-name]`); if (!el) return;
+  const old = tgBase(path), inp = document.createElement("input"); inp.type = "text"; inp.value = old; inp.className = "tg-edit";
+  el.replaceWith(inp); inp.focus(); inp.setSelectionRange(0, old.includes(".") ? old.lastIndexOf(".") : old.length);
+  let done = false;
+  const finish = (save) => { if (done) return; done = true; if (save && inp.value.trim() && inp.value !== old) tgDo(() => api("/api/tugas/rename", { body: { path, name: inp.value } })); else tgRender(); };
+  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") finish(true); else if (e.key === "Escape") finish(false); };
+  inp.onblur = () => finish(true); inp.onclick = inp.ondblclick = (e) => e.stopPropagation();
+}
+function tgTrash(paths) {
+  if (!paths.length) return;
+  const what = paths.length === 1 ? `“${tgBase(paths[0])}”` : `${paths.length} items`;
+  if (!confirm(`Move ${what} to the Recycle Bin?\n\nYou can restore ${paths.length === 1 ? "it" : "them"} from there.`)) return;
+  tgDo(() => api("/api/tugas/delete", { body: { paths } }), "Moved to the Recycle Bin");
+}
+async function tgMeta(path) {
+  const m = (await api("/api/tugas?path=" + encodeURIComponent(path))).meta;
+  const box = modal(`<h2>Due date &amp; note</h2><p class="small muted" style="margin-top:0">${esc(path)}</p><label class="f">Due date</label><input type="date" id="tgd" value="${esc(m.due)}">
+    <label class="f">Note</label><textarea id="tgt" placeholder="What it is, who it is for, anything to remember">${esc(m.note)}</textarea>
+    <div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Save</button></div>`);
+  $("#tgx", box).onclick = closeModal;
+  $("#tgok", box).onclick = () => { const due = $("#tgd", box).value, note = $("#tgt", box).value; closeModal(); tgDo(() => api("/api/tugas/meta", { method: "PUT", body: { path, due, note } }), "Saved"); };
+}
+async function tgLink(path) {
+  const m = (await api("/api/tugas?path=" + encodeURIComponent(path))).meta;
+  const [docs, papers] = await Promise.all([api(`/api/projects/${S.project.id}/documents?kind=doc`), api(`/api/projects/${S.project.id}/papers`)]);
+  const row = (t, id, title, on) => `<label class="tg-pick" data-t="${esc(title.toLowerCase())}"><input type="checkbox" data-${t}="${id}" ${on ? "checked" : ""}> <span>${esc(title)}</span></label>`;
+  const box = modal(`<h2>Link A.F.R.A items</h2><p class="small muted" style="margin-top:0">To <b>${esc(path)}</b>, from the project “${esc(S.project.name)}”.</p><input type="text" id="tgf" placeholder="Filter by title…">
+    <div class="scroll" style="max-height:48vh;margin-top:8px"><h3 class="small muted">Documents</h3>${docs.length ? docs.map((d) => row("doc", d.id, d.title, m.docs.includes(d.id))).join("") : '<div class="small muted">No documents in this project.</div>'}
+    <h3 class="small muted" style="margin-top:12px">Papers</h3>${papers.length ? papers.map((p) => row("paper", p.id, p.title || "Untitled", m.papers.includes(p.id))).join("") : '<div class="small muted">No papers in this project.</div>'}</div>
+    <div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Save</button></div>`);
+  $("#tgf", box).oninput = (e) => $$(".tg-pick", box).forEach((l) => l.style.display = l.dataset.t.includes(e.target.value.toLowerCase()) ? "" : "none");
+  $("#tgx", box).onclick = closeModal;
+  $("#tgok", box).onclick = () => {  // links to items of other projects stay as they were
+    const keep = (all, ids) => ids.filter((i) => !all.some((x) => x.id === i));
+    const body = { path, docs: [...keep(docs, m.docs), ...$$("[data-doc]:checked", box).map((x) => x.dataset.doc)], papers: [...keep(papers, m.papers), ...$$("[data-paper]:checked", box).map((x) => x.dataset.paper)] };
+    closeModal(); tgDo(() => api("/api/tugas/meta", { method: "PUT", body }), "Saved");
+  };
+}
+const tgIsPptx = (it) => it && it.kind === "file" && it.ext === "pptx";
+function tgSelBar() {  // one selected .pptx: the things to do with it
+  const bar = $("#tgselbar"); if (!bar) return;
+  const it = T.sel.size === 1 ? T.data.items.find((i) => i.path === [...T.sel][0]) : null;
+  if (!tgIsPptx(it)) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
+  bar.classList.remove("hidden");
+  bar.innerHTML = `<span class="small"><b>${esc(it.name)}</b></span><button class="btn small" data-sb="open">Open in PowerPoint</button>
+    <button class="btn small" data-sb="gslides">Open in Google Slides</button><button class="btn small" data-sb="design">Use as design</button>`;
+  $$("[data-sb]", bar).forEach((b) => b.onclick = () => busy(b, () => ({ open: () => tgOpen(it), gslides: () => tgGoogle(it), design: () => tgUseDesign(it) })[b.dataset.sb]()));
+}
+async function tgGoogle(it) {
+  try {
+    const r = await api("/api/tugas/google-slides", { body: { path: it.path } });
+    toast("In Google Slides now (A.F.R.A Decks)", "ok"); window.open(r.url, "_blank");
+  } catch (e) {
+    if (!/Google account/.test(e.message)) return toast(e.message, "bad");
+    const box = modal(`<h2>Connect Google first</h2><p>${esc(e.message)}</p><div class="modal-foot"><button class="btn" id="tgx">Close</button><button class="btn primary" id="tgok">Open Settings</button></div>`);
+    $("#tgx", box).onclick = closeModal; $("#tgok", box).onclick = () => { closeModal(); location.hash = "#settings"; };
+  }
+}
+async function tgUseDesign(it) {
+  const r = await api("/api/tugas/use-as-design", { body: { path: it.path } });
+  toast(`"${r.name}" is now a design (Designs folder)`, "ok");
+}
+// New deck opens the Create into PPT wizard with this folder preset (its quick path: a blank deck or one of your documents)
+function tgNewDeck() {
+  if (!T.path) return toast("Open a folder first: the deck is saved inside it");
+  openWizardIn(T.path);
+}
+const tgOpen = (it) => it.kind === "folder" ? (location.hash = tgUrl(it.path)) : api("/api/tugas/open", { body: { path: it.path } }).catch((e) => toast(e.message, "bad"));
+function tgContext(e) {
+  e.preventDefault();
+  const el = e.target.closest(".tg-item[data-p]"), path = el?.dataset.p;
+  if (el && !T.sel.has(path)) { T.sel = new Set([path]); $$(".tg-item").forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p))); }
+  const sel = tgSelected(), one = el && sel.length === 1 ? T.data.items.find((i) => i.path === sel[0]) : null;
+  let list;
+  if (!el) list = [["mkdir", "New folder"], ["upload", "Upload files…"], ...(T.path ? [["newdeck", "New deck…"]] : []), ["-"], ["reveal", "Show this folder in File Explorer"]];
+  else if (!one) list = [["trash", "Move to Recycle Bin", "danger"]];
+  else list = [["open", tgIsPptx(one) ? "Open in PowerPoint" : "Open"], ...(tgIsPptx(one) ? [["gslides", "Open in Google Slides"], ["design", "Use as design"]] : []), ["reveal", "Show in File Explorer"], ["rename", "Rename"], ...(one.kind === "folder" ? [["-"], ["meta", "Set due date / note"], ["link", "Link A.F.R.A document or paper"]] : []), ["-"], ["trash", "Move to Recycle Bin", "danger"]];
+  $$(".tg-menu").forEach((m) => m.remove());
+  const m = document.createElement("div"); m.className = "tg-menu";
+  m.innerHTML = list.map(([k, label, cls]) => k === "-" ? "<hr>" : `<button data-k="${k}" class="${cls || ""}">${label}</button>`).join("");
+  document.body.appendChild(m);
+  m.style.left = Math.max(4, Math.min(e.clientX, innerWidth - m.offsetWidth - 8)) + "px"; m.style.top = Math.max(4, Math.min(e.clientY, innerHeight - m.offsetHeight - 8)) + "px";
+  m.onclick = (ev) => {
+    const k = ev.target.dataset.k; if (!k) return; m.remove();
+    if (k === "mkdir") tgNew(); else if (k === "upload") $("#tgfile").click(); else if (k === "newdeck") tgNewDeck();
+    else if (k === "gslides") tgGoogle(one); else if (k === "design") tgUseDesign(one).catch((x) => toast(x.message, "bad"));
+    else if (k === "reveal") api("/api/tugas/reveal", { body: { path: one ? one.path : T.path } }).catch((x) => toast(x.message, "bad"));
+    else if (k === "open") tgOpen(one); else if (k === "rename") tgRename(one.path);
+    else if (k === "meta") tgMeta(one.path).catch((x) => toast(x.message, "bad")); else if (k === "link") tgLink(one.path).catch((x) => toast(x.message, "bad")); else if (k === "trash") tgTrash(sel);
+  };
+}
+function tgWire() {
+  const root = main(), pane = $(".tg-main");
+  $("#tgfile").onchange = (e) => { tgUpload(e.target.files); e.target.value = ""; };
+  $("#tgq").oninput = debounce(async (e) => {
+    T.query = e.target.value.trim(); T.found = T.query ? await api("/api/tugas/search?q=" + encodeURIComponent(T.query)).catch(() => []) : null;
+    tgRender(); const q = $("#tgq"); q.focus(); q.setSelectionRange(q.value.length, q.value.length);
+  }, 300);
+  $$("[data-act]", root).forEach((b) => b.onclick = () => {
+    const a = b.dataset.act;
+    if (a === "mkdir") tgNew(); else if (a === "upload") $("#tgfile").click(); else if (a === "newdeck") tgNewDeck();
+    else if (a === "mode") { T.mode = T.mode === "grid" ? "list" : "grid"; try { localStorage.setItem("rt_tugas_mode", T.mode); } catch { } tgRender(); }
+    else if (a === "meta") tgMeta(T.path).catch((x) => toast(x.message, "bad")); else if (a === "link") tgLink(T.path).catch((x) => toast(x.message, "bad"));
+  });
+  $$("[data-unlink]", root).forEach((b) => b.onclick = () => {
+    const [t, id] = b.dataset.unlink.split(":"), m = T.data.meta;
+    tgDo(() => api("/api/tugas/meta", { method: "PUT", body: { path: T.path, [t === "doc" ? "docs" : "papers"]: m[t === "doc" ? "docs" : "papers"].filter((x) => x !== id) } }), "Unlinked");
+  });
+  $$("[data-toggle]", root).forEach((c) => c.onclick = (e) => {
+    e.preventDefault(); e.stopPropagation(); const p = c.dataset.toggle;
+    if ((T.path + "/").startsWith(p + "/")) { location.hash = tgUrl(p); return; }  // collapsing a branch that holds the open folder: step up to it
+    T.open.has(p) ? T.open.delete(p) : T.open.add(p);
+    try { localStorage.setItem("rt_tugas_open", JSON.stringify([...T.open])); } catch { }
+    tgRender();
+  });
+  $$(".tg-hit", root).forEach((h) => h.onclick = () => { T.query = ""; T.found = null; const p = h.dataset.kind === "folder" ? h.dataset.hit : tgParent(h.dataset.hit); if (p === T.path) tgLoad(p); else location.hash = tgUrl(p); });
+  // selection, opening, context menu
+  $$(".tg-item[data-p]", root).forEach((el) => {
+    const it = T.data.items.find((i) => i.path === el.dataset.p);
+    el.onclick = (e) => {
+      if (e.target.tagName === "INPUT") return;
+      const p = el.dataset.p;
+      if (e.shiftKey && T.last) { const ps = T.data.items.map((i) => i.path), a = ps.indexOf(T.last), b = ps.indexOf(p); T.sel = new Set(ps.slice(Math.min(a, b), Math.max(a, b) + 1)); }
+      else if (e.ctrlKey || e.metaKey) { T.sel.has(p) ? T.sel.delete(p) : T.sel.add(p); T.last = p; }
+      else { T.sel = new Set([p]); T.last = p; }
+      $$(".tg-item", root).forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p)));
+      tgSelBar();
+    };
+    el.ondblclick = (e) => { if (e.target.tagName !== "INPUT") tgOpen(it); };
+    el.ondragstart = (e) => {
+      if (!T.sel.has(el.dataset.p)) { T.sel = new Set([el.dataset.p]); $$(".tg-item", root).forEach((x) => x.classList.toggle("sel", T.sel.has(x.dataset.p))); }
+      e.dataTransfer.setData("application/x-afra-tugas", JSON.stringify(tgSelected())); e.dataTransfer.effectAllowed = "move";
+    };
+  });
+  pane.oncontextmenu = tgContext;
+  // drag and drop: items onto folders (grid, tree, breadcrumb) and files from the desktop onto a folder or the page
+  const types = (e) => [...(e.dataTransfer?.types || [])];
+  const hasFiles = (e) => types(e).includes("Files"), isMine = (e) => types(e).includes("application/x-afra-tugas");
+  $$("[data-drop]", root).forEach((el) => {
+    el.ondragover = (e) => { if (isMine(e) || hasFiles(e)) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = isMine(e) ? "move" : "copy"; el.classList.add("drop"); } };
+    el.ondragleave = () => el.classList.remove("drop");
+    el.ondrop = (e) => {
+      e.preventDefault(); e.stopPropagation(); el.classList.remove("drop"); pane.classList.remove("drop");
+      const to = el.dataset.p;
+      if (isMine(e)) {
+        const paths = JSON.parse(e.dataTransfer.getData("application/x-afra-tugas")).filter((p) => p !== to && tgParent(p) !== to);
+        if (paths.length) tgDo(() => api("/api/tugas/move", { body: { paths, to } }), paths.length === 1 ? `Moved “${tgBase(paths[0])}”` : `Moved ${paths.length} items`);
+      } else if (hasFiles(e)) tgUpload(e.dataTransfer.files, to);
+    };
+  });
+  pane.ondragover = (e) => { if (hasFiles(e)) { e.preventDefault(); pane.classList.add("drop"); } };
+  pane.ondragleave = (e) => { if (!pane.contains(e.relatedTarget)) pane.classList.remove("drop"); };
+  pane.ondrop = (e) => { if (hasFiles(e)) { e.preventDefault(); pane.classList.remove("drop"); tgUpload(e.dataTransfer.files); } };
+  pane.onclick = (e) => { if (!e.target.closest(".tg-item, button, a, input, label")) { T.sel = new Set(); $$(".tg-item", root).forEach((x) => x.classList.remove("sel")); tgSelBar(); } };
+  tgSelBar();
+}
+if (!window.__tgKeys) {
+  window.__tgKeys = true;
+  document.addEventListener("keydown", (e) => {
+    if (S.view !== "tugas" || !T.data || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || !$("#modal").classList.contains("hidden")) return;
+    if (e.key === "F2" && T.sel.size === 1) { e.preventDefault(); tgRename([...T.sel][0]); }
+    else if (e.key === "Delete" && T.sel.size) { e.preventDefault(); tgTrash(tgSelected()); }
+    else if (e.key === "Enter" && T.sel.size === 1) { const it = T.data.items.find((i) => i.path === [...T.sel][0]); if (it) tgOpen(it); }
+    else if (e.key === "Backspace" && T.path) { e.preventDefault(); location.hash = tgUrl(tgParent(T.path)); }
+    else if (e.key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); T.sel = new Set(T.data.items.map((i) => i.path)); tgRender(); }
+  });
+  const closeMenus = () => $$(".tg-menu").forEach((m) => m.remove());
+  document.addEventListener("click", closeMenus); document.addEventListener("scroll", closeMenus, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+}
+VIEWS.tugas = async () => {
+  const path = location.hash.split("/").slice(1).map(decodeURIComponent).join("/");
+  T.query = ""; T.found = null;
+  try { await tgLoad(path); } catch (e) {
+    if (path) { toast(e.message, "bad"); location.hash = "#tugas"; return; }
+    main().innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
+  }
 };
 
 boot().catch((e) => { main().innerHTML = `<div class="notice bad">Failed to start: ${esc(e.message)}</div>`; });

@@ -1,9 +1,36 @@
 """Settings storage (data/settings.json) with environment-variable fallbacks."""
 import json
 import os
+import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def documents_dir() -> Path:
+    """The Documents folder File Explorer shows; on Windows it is often moved into OneDrive, away from ~/Documents."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(260)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:  # 5 = CSIDL_PERSONAL
+                return Path(buf.value)
+        except (OSError, AttributeError):
+            pass
+    docs = Path.home() / "Documents"
+    return docs if docs.exists() else Path.home()
+
+
+def replace_file(tmp: Path, dst: Path) -> None:
+    """os.replace that rides out Windows' brief "Access is denied" while OneDrive, antivirus or the indexer holds dst."""
+    for i in range(10):
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:
+            if i == 9:
+                raise
+            time.sleep(0.05 * (i + 1))
 DATA_DIR = Path(os.environ.get("RT_DATA_DIR", BASE_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = DATA_DIR / "settings.json"
@@ -46,6 +73,9 @@ DEFAULTS = {
     "phone_pin": "",
     "phone_secret": "",
     "chat_url": "https://chat.farmansyah.cloud",  # the private chat (github.com/farmansyah/afra-chat), behind the heart
+    "tugas_dir": "",                   # root of the Tugas folders; empty = Documents/A.F.R.A Tugas
+    "designs_dir": "",                 # folder of .pptx designs; empty = <Tugas folder>/_Designs
+    "template_vision_model": "z-ai/glm-4.5v",  # reads template previews when a link has no free .pptx (needs an OpenRouter key)
     "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
     "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }

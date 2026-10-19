@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
+from . import designs, google_api, gslides, pdf_design, pptx_build, template_import, tugas, tugas_decks, wizard
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -162,9 +163,19 @@ async def llm_error(_, exc):
     return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
+@app.exception_handler(tugas.TugasError)
+async def tugas_error(_, exc):
+    return JSONResponse({"detail": str(exc)}, status_code=400)
+
+
 @app.exception_handler(ValueError)
 async def value_error(_, exc):
     return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.exception_handler(google_api.GoogleError)
+async def google_error(_, exc):
+    return JSONResponse({"detail": str(exc), "reconnect": exc.status == 401}, status_code=exc.status)
 
 
 def _404(obj, what="Not found"):
@@ -1058,6 +1069,235 @@ def studio_keys():
     return studio.open_env()
 
 
+# ---------------------------------------------------------------- Slides studio: Google accounts, designs, decks
+def _attach(data: bytes, name: str, mime: str) -> Response:
+    return Response(data, media_type=mime, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
+@app.get("/api/google/client")
+def google_client():
+    return google_api.client_status()
+
+
+@app.post("/api/google/client")
+def google_client_save(body: dict):
+    return google_api.save_client(body.get("json", ""), body.get("picker_api_key"))
+
+
+@app.post("/api/google/connect")
+def google_connect(body: dict):
+    return google_api.start_connect(body.get("login_hint", ""))
+
+
+@app.get("/api/google/connect/{state}")
+def google_connect_status(state: str):
+    return google_api.connect_status(state)
+
+
+@app.get("/api/google/accounts")
+def google_accounts():
+    return {"accounts": google_api.accounts(), "client": google_api.client_status(),
+            "drive_folder": str(pptx_build.drive_root() or "")}
+
+
+@app.post("/api/google/default")
+def google_default(body: dict):
+    google_api.set_default(body["email"])
+    return {"accounts": google_api.accounts()}
+
+
+@app.post("/api/google/disconnect")
+def google_disconnect(body: dict):
+    return google_api.disconnect(body["email"])
+
+
+@app.get("/api/google/picker")
+def google_picker(account: str = ""):
+    return google_api.picker_info(account or None)
+
+
+@app.post("/api/google/sheets/read")
+async def google_sheet_read(body: dict):
+    return await asyncio.to_thread(gslides.read_sheet, body["link"], body.get("range", ""), body.get("account") or None)
+
+
+@app.post("/api/google/sheets/upload")
+async def google_sheet_upload(file: UploadFile = File(...), account: str = ""):
+    data = await file.read()
+    return await asyncio.to_thread(gslides.upload_sheet, data, file.filename or "data.xlsx", account or None)
+
+
+@app.get("/api/google/pptmaster")
+def google_pptmaster():
+    return {"folder": str(slides.FOLDER), "files": gslides.pptmaster_files()}
+
+
+@app.post("/api/google/pptx-to-slides")
+async def google_pptx_to_slides(body: dict):
+    return await asyncio.to_thread(gslides.pptx_to_slides, body.get("path", ""), None, "", body.get("account") or None)
+
+
+@app.post("/api/google/pptx-upload")
+async def google_pptx_upload(file: UploadFile = File(...), account: str = ""):
+    data = await file.read()
+    return await asyncio.to_thread(gslides.pptx_to_slides, "", data, file.filename or "Deck.pptx", account or None)
+
+
+@app.get("/api/designs")
+def designs_list():
+    return {"designs": designs.all_designs(), "how": designs.HOW}
+
+
+@app.post("/api/designs")
+async def designs_add(body: dict):
+    """One or several links (template pages, Google Slides links), one per line."""
+    return await asyncio.to_thread(gslides.add_designs, body.get("links", ""), body.get("account") or None)
+
+
+@app.get("/api/designs/folder")
+def designs_folder():
+    return designs.folder_status()
+
+
+@app.post("/api/designs/folder/open")
+def designs_folder_open():
+    tugas.launch(designs.folder())
+    return {"ok": True}
+
+
+@app.post("/api/designs/import")
+def designs_import(body: dict):
+    """Links to free templates (Slidesgo, SlidesCarnival, Microsoft, Google Slides...), saved into the Designs folder.
+    Returns a job; GET /api/designs/import/{job} says what happened to each link."""
+    return template_import.start(body.get("links", ""))
+
+
+@app.get("/api/designs/import/{jid}")
+def designs_import_job(jid: str):
+    return template_import.job(jid)
+
+
+@app.post("/api/designs/pptx")
+async def designs_add_pptx(file: UploadFile = File(...)):
+    data = await file.read()
+    if not (file.filename or "").lower().endswith(".pptx"):
+        raise ValueError("Upload a PowerPoint .pptx file (a .potx or .ppt: save it as .pptx first).")
+    return designs.add_pptx(data, file.filename)
+
+
+@app.post("/api/designs/pdf")
+async def designs_add_pdf(file: UploadFile = File(...)):
+    """Slides exported as PDF: colours and fonts read from the drawing commands, or layouts from page pictures with the GLM vision step."""
+    data = await file.read()
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise ValueError("Upload slides exported as a PDF file.")
+    return await asyncio.to_thread(pdf_design.import_pdf, data, file.filename)
+
+
+@app.post("/api/designs/colors")
+def designs_add_colors(body: dict):
+    return designs.from_colors(body.get("name", ""), body.get("colors") or [], body.get("fonts") or [])
+
+
+@app.post("/api/designs/restore")
+def designs_restore():
+    return {"designs": designs.restore_builtins()}
+
+
+@app.patch("/api/designs/{did}")
+def designs_update(did: str, body: dict):
+    return designs.update(did, body.get("name"), bool(body.get("default")))
+
+
+@app.delete("/api/designs/{did}")
+async def designs_delete(did: str):
+    return await asyncio.to_thread(gslides.forget_design, did)
+
+
+@app.get("/api/designs/{did}/thumb")
+def designs_thumb(did: str):
+    data, mime = designs.thumb(did)
+    return Response(data, media_type=mime, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/decks")
+def decks_list(account: str = ""):
+    return {"decks": gslides.decks(account or None), "accounts": google_api.accounts(),
+            "drive_folder": str(pptx_build.drive_root() or "")}
+
+
+@app.get("/api/decks/drive")
+def decks_drive():
+    root = pptx_build.drive_root()
+    return {"found": bool(root), "folder": str(root / pptx_build.FOLDER_NAME) if root else "",
+            "fallback": str(slides.FOLDER / "decks")}
+
+
+@app.post("/api/decks/materials")
+async def decks_material(file: UploadFile = File(...)):
+    data = await file.read()
+    return await asyncio.to_thread(gslides.add_material, file.filename or "file.txt", data)
+
+
+@app.post("/api/decks/outline")
+async def decks_outline(body: dict):
+    return await gslides.outline(body)
+
+
+@app.post("/api/decks/content")
+async def decks_content(body: dict):
+    return await gslides.content(body)
+
+
+@app.post("/api/decks/fit")
+def decks_fit(body: dict):
+    """Content written elsewhere (the chat, the MCP tools): clean it and split what would not fit."""
+    return gslides.finish_content([gslides._clean(s, s) for s in body.get("slides") or [] if isinstance(s, dict)],
+                                  body.get("project_id", ""), body.get("notes", True))
+
+
+@app.post("/api/decks/build")
+def decks_build(body: dict):
+    return gslides.build(body)
+
+
+@app.get("/api/decks/jobs/{jid}")
+def decks_job(jid: str):
+    return gslides.job(jid)
+
+
+@app.get("/api/decks/{did}")
+def decks_get(did: str):
+    return gslides.deck(did)
+
+
+@app.delete("/api/decks/{did}")
+def decks_forget(did: str):
+    gslides.forget_deck(did)
+    return {"ok": True}
+
+
+@app.get("/api/decks/{did}/export")
+async def decks_export(did: str, fmt: str = "pptx"):
+    data, name = await asyncio.to_thread(gslides.export_deck, did, fmt)
+    return _attach(data, name, "application/pdf" if fmt == "pdf" else google_api.MIME_PPTX)
+
+
+@app.post("/api/decks/{did}/slide")
+async def decks_slide(did: str, body: dict):
+    return await asyncio.to_thread(gslides.update_slide, did, int(body["index"]), body.get("slide") or {})
+
+
+@app.post("/api/decks/{did}/redo")
+async def decks_redo(did: str, body: dict):
+    return await gslides.redo(did, int(body["index"]), body.get("action", "rewrite"), body.get("instruction", ""))
+
+
+@app.post("/api/decks/{did}/restyle")
+def decks_restyle(did: str, body: dict):
+    return gslides.restyle(did, body["design_id"], body.get("targets"))
+
+
 # ---------------------------------------------------------------- export
 def _logo_files():
     from .docx_export import COVER_LOGO
@@ -1105,6 +1345,234 @@ def export_docx(body: dict):
     return Response(data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}.docx",
                              "X-Cited": str(info["cited"]), "X-Missing": quote(",".join(info["missing"]))})
+
+
+# ---------------------------------------------------------------- Tugas (folders on disk)
+@app.get("/api/tugas")
+def tugas_list(path: str = ""):
+    return tugas.list_dir(path)
+
+
+@app.get("/api/tugas/tree")
+def tugas_tree():
+    return tugas.tree()
+
+
+@app.get("/api/tugas/upcoming")
+def tugas_upcoming():
+    return tugas.upcoming()
+
+
+@app.get("/api/tugas/search")
+def tugas_search(q: str = ""):
+    return tugas.search(q)
+
+
+@app.post("/api/tugas/mkdir")
+def tugas_mkdir(body: dict):
+    return tugas.mkdir(body.get("path", ""), body.get("name"))
+
+
+@app.post("/api/tugas/rename")
+def tugas_rename(body: dict):
+    return tugas.rename(body.get("path", ""), body.get("name"))
+
+
+@app.post("/api/tugas/move")
+def tugas_move(body: dict):
+    return {"paths": tugas.move(body.get("paths") or [], body.get("to", ""))}
+
+
+@app.post("/api/tugas/delete")
+def tugas_delete(body: dict):
+    return {"deleted": tugas.delete(body.get("paths") or [])}
+
+
+@app.post("/api/tugas/upload")
+def tugas_upload(path: str = "", files: list[UploadFile] = File(...)):
+    return {"saved": [tugas.save_upload(path, f.filename, f.file) for f in files]}
+
+
+@app.post("/api/tugas/open")
+def tugas_open(body: dict):
+    tugas.open_item(body.get("path", ""))
+    return {"ok": True}
+
+
+@app.post("/api/tugas/reveal")
+def tugas_reveal(body: dict):
+    tugas.reveal(body.get("path", ""))
+    return {"ok": True}
+
+
+@app.post("/api/tugas/deck")
+def tugas_deck(body: dict):
+    """A new deck from a design, saved into a Tugas folder. source: {"type": "blank"} or {"type": "doc", "id": ...};
+    slides: already written slides (from /api/decks/outline + /api/decks/content), which skips the AI here. Returns a job."""
+    return tugas_decks.start(body.get("path", ""), body.get("design_id", ""), body.get("title", ""), body.get("source"), body.get("slides"))
+
+
+@app.get("/api/tugas/deck/jobs/{jid}")
+def tugas_deck_job(jid: str):
+    return tugas_decks.job(jid)
+
+
+def _tugas_pptx(path) -> Path:
+    p = tugas.resolve(path)
+    if not p.is_file() or p.suffix.lower() != ".pptx":
+        raise tugas.TugasError("Pick a PowerPoint (.pptx) file.")
+    return p
+
+
+@app.post("/api/tugas/use-as-design")
+def tugas_use_as_design(body: dict):
+    p = _tugas_pptx(body.get("path", ""))
+    data = p.read_bytes()
+    designs.pptx_theme(data)  # a real PowerPoint with a theme, or a plain message
+    return {"name": designs.save_to_folder(data, p.name).stem}
+
+
+@app.post("/api/tugas/google-slides")
+async def tugas_google_slides(body: dict):
+    """Upload a .pptx of the Tugas folders to "A.F.R.A Decks" and convert it to Google Slides."""
+    p = _tugas_pptx(body.get("path", ""))
+    if not google_api.accounts():
+        raise ValueError("Connect a Google account first: Settings › Google.")
+    return await asyncio.to_thread(gslides.pptx_to_slides, "", p.read_bytes(), p.name, body.get("account") or None)
+
+
+@app.put("/api/tugas/meta")
+def tugas_meta(body: dict):
+    return tugas.set_meta(body.get("path", ""), body.get("due"), body.get("note"), body.get("docs"), body.get("papers"))
+
+
+# ---------------------------------------------------------------- Create into PPT (the wizard)
+@app.get("/api/wizard")
+def wizard_list():
+    return wizard.listing()
+
+
+@app.post("/api/wizard")
+def wizard_new(body: dict):
+    """mode: topic | upload | doc | paper | blank. A draft is saved on disk, so closing the page and coming back resumes it."""
+    return wizard.public(wizard.new(body))
+
+
+@app.get("/api/wizard/jobs/{jid}")
+def wizard_job(jid: str):
+    return wizard.job(jid)
+
+
+@app.get("/api/wizard/{wid}")
+def wizard_get(wid: str):
+    return wizard.public(wizard.load(wid))
+
+
+@app.put("/api/wizard/{wid}")
+def wizard_put(wid: str, body: dict):
+    return wizard.public(wizard.patch(wid, body))
+
+
+@app.delete("/api/wizard/{wid}")
+def wizard_delete(wid: str):
+    wizard.delete(wid)
+    return {"ok": True}
+
+
+@app.post("/api/wizard/{wid}/essay/start")
+async def wizard_essay_start(wid: str):
+    return await wizard.start_essay(wid)
+
+
+@app.get("/api/wizard/{wid}/essay")
+def wizard_essay(wid: str):
+    return wizard.essay_status(wid)
+
+
+@app.get("/api/wizard/{wid}/essay/candidates")
+def wizard_essay_candidates(wid: str):
+    return wizard.essay_candidates(wid)
+
+
+@app.post("/api/wizard/{wid}/essay/attach")
+def wizard_essay_attach(wid: str, body: dict):
+    return wizard.public(wizard.attach_essay(wid, body.get("doc_id", "")))
+
+
+@app.post("/api/wizard/{wid}/essay/approve")
+def wizard_essay_approve(wid: str, body: dict):
+    return wizard.public(wizard.approve_essay(wid, body.get("approved", True)))
+
+
+@app.post("/api/wizard/{wid}/essay/revise")
+async def wizard_essay_revise(wid: str, body: dict):
+    return await wizard.revise_essay(wid, body.get("instruction", ""))
+
+
+@app.get("/api/wizard/{wid}/essay/export")
+async def wizard_essay_export(wid: str, fmt: str = "pdf"):
+    if fmt not in ("pdf", "docx"):
+        raise ValueError("Export as pdf or docx.")
+    data, name = await asyncio.to_thread(wizard.export_pdf if fmt == "pdf" else wizard.export_docx, wid)
+    return _attach(data, name, "application/pdf" if fmt == "pdf" else google_api.MIME_DOCX)
+
+
+@app.post("/api/wizard/{wid}/essay/google-doc")
+async def wizard_essay_google_doc(wid: str, body: dict):
+    return await asyncio.to_thread(wizard.export_google_doc, wid, body.get("account") or None)
+
+
+@app.post("/api/wizard/{wid}/materials")
+async def wizard_material(wid: str, file: UploadFile = File(...)):
+    data = await file.read()
+    return await asyncio.to_thread(wizard.add_material, wid, file.filename or "file.txt", data)
+
+
+@app.post("/api/wizard/{wid}/materials/google-doc")
+async def wizard_material_google(wid: str, body: dict):
+    return await asyncio.to_thread(wizard.add_google_doc, wid, body.get("link", ""), body.get("account") or None)
+
+
+@app.delete("/api/wizard/{wid}/materials/{mid}")
+def wizard_material_delete(wid: str, mid: str):
+    wizard.remove_material(wid, mid)
+    return {"ok": True}
+
+
+@app.post("/api/wizard/{wid}/analyze")
+async def wizard_analyze(wid: str):
+    return await wizard.analyze(wid)
+
+
+@app.post("/api/wizard/{wid}/mockup")
+async def wizard_mockup(wid: str):
+    """Source -> wireframes (two AI steps: the outline, then the slides). A blank source needs no AI."""
+    return await wizard.make_mockup(wid)
+
+
+@app.put("/api/wizard/{wid}/mockup")
+def wizard_mockup_save(wid: str, body: dict):
+    return wizard.save_mockup(wid, body)
+
+
+@app.post("/api/wizard/{wid}/mockup/op")
+def wizard_mockup_op(wid: str, body: dict):
+    return wizard.edit_mockup(wid, body, body.get("mockup"))
+
+
+@app.post("/api/wizard/{wid}/rewrite")
+async def wizard_rewrite(wid: str, body: dict):
+    return await wizard.rewrite(wid, body.get("index"), body.get("instruction", ""), body.get("layout", ""))
+
+
+@app.get("/api/wizard/{wid}/review")
+def wizard_review(wid: str):
+    return wizard.review(wid)
+
+
+@app.post("/api/wizard/{wid}/create")
+def wizard_create(wid: str):
+    return wizard.start_create(wid)
 
 
 # ---------------------------------------------------------------- frontend

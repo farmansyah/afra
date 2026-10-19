@@ -19,7 +19,7 @@ from pathlib import Path
 import httpx
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-URL = os.environ.get("AFRA_URL", "http://127.0.0.1:8765")
+URL = os.environ.get("AFRA_URL", "http://127.0.0.1:8778")
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = """A.F.R.A is the user's own research library and manuscript tool, running on their computer.
 - Find real papers with search_papers / citation_trail. Never invent references: cite only papers that are in the
@@ -28,7 +28,9 @@ INSTRUCTIONS = """A.F.R.A is the user's own research library and manuscript tool
   APA, IEEE, Harvard, Chicago, Vancouver or MLA citations plus the reference list when exporting to Word.
 - Documents are Markdown (# headings, **bold**, tables). save_document stores them; export_word makes the .docx.
 - Prefer high-quality sources (Q1/Q2, recent, cited) and say when evidence is thin.
-- A message like "A.F.R.A task <id>" means the user pressed a button in A.F.R.A: call get_task, do it, finish_task."""
+- A message like "A.F.R.A task <id>" means the user pressed a button in A.F.R.A: call get_task, do it, finish_task.
+- Decks: write the slides yourself and call google_slides_create (Google Slides when an account is connected, and/or an
+  editable .pptx). Pick a design with google_slides_templates; get a document's text with slide_material."""
 
 
 # ---------------------------------------------------------------- talking to the A.F.R.A server
@@ -217,8 +219,21 @@ def t_save(a):
     return f"Created '{d['title']}' (id {d['id']}) in project '{p['name']}'. The user sees it under Documents in A.F.R.A."
 
 
+def _documents() -> Path:
+    """Same as app.config.documents_dir (this file runs on its own, so it can't import the app)."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(260)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
+                return Path(buf.value)
+        except (OSError, AttributeError):
+            pass
+    return Path.home() / "Documents"
+
+
 def _export_dir() -> Path:
-    for d in (Path.home() / "Documents" / "AFRA exports", BASE_DIR / "data" / "exports"):
+    for d in (_documents() / "AFRA exports", BASE_DIR / "data" / "exports"):
         try:
             d.mkdir(parents=True, exist_ok=True)
             return d
@@ -299,6 +314,78 @@ def t_check_refs(a):
     return "\n".join(lines) if len(lines) > 1 else lines[0] + " No problems found (no retractions, DOIs resolve)."
 
 
+# ---------------------------------------------------------------- Slides studio (Google Slides and .pptx decks)
+def t_g_accounts(_):
+    r = api("GET", "/api/google/accounts").json()
+    lines = [f"- {a['email']}" + (" (default)" if a["default"] else "") + (" NEEDS RECONNECT in A.F.R.A > Slides > Accounts" if a["needs_reconnect"] else "")
+             for a in r["accounts"]]
+    if not r["client"]["configured"]:
+        lines.append("Google isn't set up yet: the user opens A.F.R.A > Slides > Accounts and follows the steps.")
+    elif not r["accounts"]:
+        lines.append("No Google account connected: the user clicks Connect in A.F.R.A > Slides > Accounts.")
+    lines.append("Google Drive for desktop folder: " + (r["drive_folder"] or "not found (a .pptx is saved on this computer instead)"))
+    return "\n".join(lines)
+
+
+def t_g_designs(_):
+    r = api("GET", "/api/designs").json()
+    return "Designs (pass the id as design_id):\n" + "\n".join(
+        f"- {d['id']}: {d['name']} [{d['kind']}]" + (" (default)" if d.get("default") else "") for d in r["designs"])
+
+
+def t_g_create(a):
+    p = _project(a.get("project", ""))
+    fit = api("POST", "/api/decks/fit", json={"slides": a["slides"], "project_id": p["id"], "notes": a.get("notes", True)}).json()
+    targets = a.get("targets") or ["google", "pptx"]
+    j = api("POST", "/api/decks/build", json={"slides": fit["slides"], "title": a.get("title", ""), "design_id": a.get("design_id", ""),
+                                              "targets": targets, "account": a.get("account", ""), "project_id": p["id"],
+                                              "notes": a.get("notes", True), "missing": fit["missing"]}).json()
+    for _ in range(150):
+        time.sleep(2)
+        st = api("GET", f"/api/decks/jobs/{j['job']}").json()
+        if st["state"] != "working":
+            break
+    else:
+        return "Still building; the user can watch it in A.F.R.A > Slides > My decks."
+    if st["state"] == "error":
+        raise RuntimeError("A.F.R.A: " + st["error"])
+    out = []
+    if st.get("deck"):
+        out.append(f"Google Slides ({st['deck']['account']}): {st['deck']['url']}  (deck id {st['deck']['id']})")
+    if st.get("pptx"):
+        out.append(f"PowerPoint: {st['pptx']['path']}\n{st['pptx']['note']}")
+    if "google" in targets and not st.get("deck"):
+        out.append("No Google account is connected, so only the PowerPoint file was made.")
+    flags = st.get("flags") or []
+    if fit["missing"]:
+        out.append("Cite keys not in the library: " + ", ".join(fit["missing"]))
+    if flags:
+        out.append("Check these slides:\n" + "\n".join(f"- slide {f['slide']}: {f['issue']}" for f in flags[:20]))
+    return "\n".join(out)
+
+
+def t_g_update(a):
+    r = api("POST", f"/api/decks/{a['deck_id']}/slide", json={"index": int(a["slide"]) - 1, "slide": a["content"]}).json()
+    return f"Slide {r['slide']} updated: {r['url']}"
+
+
+def t_g_sheet(a):
+    r = api("POST", "/api/google/sheets/read", json={"link": a["link"], "range": a.get("range", ""), "account": a.get("account", "")}).json()
+    charts = "".join(f"\n- chart_id {c['id']}: {c['title']} (tab {t['title']})" for t in r.get("tabs") or [] for c in t.get("charts") or [])
+    rows = "\n".join(" | ".join(str(c) for c in row) for row in r["values"])
+    return f"Sheet \"{r.get('title', '')}\" ({r['range']}), sheet id {r.get('id', '')}{charts and chr(10) + 'Charts:' + charts}\n\n{rows}"
+
+
+def t_pptx_to_slides(a):
+    if not a.get("path"):
+        r = api("GET", "/api/google/pptmaster").json()
+        return f"PowerPoint files in {r['folder']} (pass one path):\n" + "\n".join(
+            f"- {f['path']}" + (f"  (already in Google Slides: {f['google']['url']})" if f.get("google") else "") for f in r["files"][:50])
+    r = api("POST", "/api/google/pptx-to-slides", json={"path": a["path"], "account": a.get("account", "")}).json()
+    return f"Converted to Google Slides in A.F.R.A Decks ({r['account']}): {r['url']}"
+
+
+
 S = {"type": "string"}
 PROJECT = {"type": "string", "description": "Project name or id. Leave out for the newest project."}
 TOOLS = {
@@ -357,6 +444,25 @@ TOOLS = {
     "check_references": (t_check_refs, "Check cited papers: missing from the library, retracted, broken DOIs.",
                          {"markdown": {**S, "description": "text whose citations to check; leave out to check the whole library"},
                           "project": PROJECT}, []),
+    "google_accounts": (t_g_accounts, "Google accounts connected to A.F.R.A for Slides/Drive, and the Google Drive for desktop folder.", {}, []),
+    "google_slides_templates": (t_g_designs, "The designs (templates) decks can be built in: A.F.R.A's own, the user's saved web/PowerPoint/Slides designs.",
+                                {}, []),
+    "google_slides_create": (t_g_create, "Build a deck from slides you wrote: Google Slides in the user's Drive (A.F.R.A Decks folder) "
+                             "and/or an editable .pptx (saved to My Drive/A.F.R.A Decks via Drive for desktop, or on this computer). "
+                             "Short bullets (max 6, under 18 words); A.F.R.A formats [@key] citations, adds the References slide "
+                             "and splits slides that would overflow.",
+                             {"title": S, "slides": {"type": "array", "items": {"type": "object", "description": "layout (title, section, content, two_column, table, chart, figure, references, closing), title, subtitle, bullets [..], left/right {heading, bullets}, table {header, rows}, chart {chart_id, sheet_id}, figure {url, caption}, caption, notes (speaker notes). Cite with [@key]."}},
+                              "design_id": {**S, "description": "from google_slides_templates; default design if left out"},
+                              "targets": {"type": "array", "items": {"type": "string", "enum": ["google", "pptx"]}, "description": "default both"},
+                              "account": {**S, "description": "Google account email; default account if left out"},
+                              "notes": {"type": "boolean", "default": True}, "project": PROJECT}, ["slides"]),
+    "google_slides_update_slide": (t_g_update, "Rewrite one slide of a Google Slides deck A.F.R.A built (text, table, speaker notes).",
+                                   {"deck_id": S, "slide": {"type": "integer", "description": "1-based slide number"}, "content": {"type": "object", "description": "layout (title, section, content, two_column, table, chart, figure, references, closing), title, subtitle, bullets [..], left/right {heading, bullets}, table {header, rows}, chart {chart_id, sheet_id}, figure {url, caption}, caption, notes (speaker notes). Cite with [@key]."}},
+                                   ["deck_id", "slide", "content"]),
+    "google_sheets_read": (t_g_sheet, "Read a Google Sheet (link or id): tabs, charts (their chart_id for chart slides) and the values.",
+                           {"link": S, "range": {**S, "description": "A1 range, e.g. 'Sheet1'!A1:F20"}, "account": S}, ["link"]),
+    "pptx_to_google_slides": (t_pptx_to_slides, "Turn a PowerPoint (e.g. a PPT Master deck in AFRA-Slides) into Google Slides. "
+                              "Without path: lists the .pptx files.", {"path": S, "account": S}, []),
 }
 
 
