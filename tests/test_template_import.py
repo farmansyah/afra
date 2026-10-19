@@ -56,6 +56,12 @@ class PageTest(unittest.TestCase):
         paid = ti.page_info(page("slidesgo_premium.html"), "https://slidesgo.com/theme/brazilian-halloween")
         self.assertEqual((paid["premium"], paid["free"]), (True, False))
 
+    def test_the_file_hidden_in_a_page_json_counts_as_a_candidate(self):
+        html = ('<script>{"theme":{"file":"https:\\/\\/storage.example-slides.test\\/sg\\/x.pptx"},"other":"free"}</script>'
+                '<a HREF="https://files.example.test/Big.PPTX?a=1">get it</a>')
+        c = ti.candidates(html, "https://slidesgo.com/theme/abstract-art")
+        self.assertEqual(c, ["https://files.example.test/Big.PPTX?a=1", "https://storage.example-slides.test/sg/x.pptx"])
+
     def test_slidescarnival_picks_its_own_pptx_not_the_related_ones(self):
         i = ti.page_info(page("slidescarnival_free.html"), "https://www.slidescarnival.com/minimalist-thesis-defense/")
         self.assertEqual(i["links"], ["https://www.slidescarnival.com/download/sc00332/minimalist-thesis-defense/pptx"])
@@ -123,16 +129,40 @@ class DirectDownloadTest(ImportTestCase):
         self.assertEqual(again["status"], "saved")
         self.assertEqual(len(list(self.designs_dir.glob("*.pptx"))), 2)
 
-    def test_slidesgo_sign_in_stops_the_import(self):
+    def test_slidesgo_free_with_the_file_named_in_its_page_json_downloads_exactly(self):
+        url = "https://slidesgo.com/theme/abstract-art"
+        data = deck("Art")
+        self.site({url: httpx.Response(200, text=page("slidesgo_free_json.html"), headers=HTML),
+                   "https://storage.example-slides.test/sg/2020/abstract-art.pptx": httpx.Response(200, content=data, headers=PPTX)})
+        r = ti.import_link(url)
+        self.assertEqual((r["status"], r["name"]), ("saved", "Abstract Art"))
+        self.assertEqual((self.designs_dir / "Abstract Art.pptx").read_bytes(), data)  # an exact copy, straight from the CDN link in the page data
+        side = json.loads((self.designs_dir / "Abstract Art.pptx.source.json").read_text(encoding="utf-8"))
+        self.assertIn("Slidesgo", side["attribution"])
+        self.assertEqual(len(self.files()), 2)  # the .pptx and its source sidecar
+
+    def test_free_page_behind_a_signin_gate_says_what_is_missing_or_the_manual_way(self):
         url = "https://slidesgo.com/theme/abstract-art"
         self.site({url: httpx.Response(200, text=page("slidesgo_free.html"), headers=HTML),
                    url + "/download": httpx.Response(302, headers={"location": "https://slidesgo.com/auth/login"}),
                    "https://slidesgo.com/auth/login": httpx.Response(200, text="<form>Sign in</form>", headers=HTML)})
+        with mock.patch.object(ti, "rea_command", return_value=None), mock.patch.object(ti, "find_browsers", return_value=[]), \
+                mock.patch.object(ti.models, "vision_default", return_value="z-ai/glm-4.5v"):
+            r = ti.import_link(url)
+        self.assertEqual(r["status"], "missing")  # the page says free, so the build from its public previews is offered
+        self.assertIn("REA", r["message"])
+        self.assertIn("drop it into the Designs folder", r["message"])  # the manual way is named too
+        self.assertEqual(self.files(), [])
+        self.assertTrue(all(m == "GET" for m, _ in self.seen))  # looked, never logged in or posted anything
+
+    def test_a_gated_page_that_does_not_say_free_still_stops_with_the_signin_advice(self):
+        url = "https://decks.example.test/theme/neon"
+        self.site({url: httpx.Response(200, text='<html><title>Neon deck</title><body><a href="/theme/neon/download">Download</a></body></html>', headers=HTML),
+                   url + "/download": httpx.Response(302, headers={"location": "https://decks.example.test/login"}),
+                   "https://decks.example.test/login": httpx.Response(200, text="<form>x</form>", headers=HTML)})
         r = ti.import_link(url)
         self.assertEqual(r["status"], "signin")
         self.assertIn("never signs in", r["message"])
-        self.assertEqual(self.files(), [])
-        self.assertTrue(all(m == "GET" for m, _ in self.seen))  # looked, never logged in or posted anything
 
     def test_premium_template_is_not_imported_and_not_downloaded(self):
         url = "https://slidesgo.com/theme/brazilian-halloween"
@@ -253,6 +283,33 @@ class VisionSpecTest(ImportTestCase):
             self.seen.append(json.loads(req.content))
             return httpx.Response(status, json={"choices": [{"message": {"content": content}}], "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
         ti.TRANSPORT = httpx.MockTransport(handler)
+
+    def test_slidesgo_free_with_a_gated_download_is_rebuilt_from_its_public_previews(self):
+        url = "https://slidesgo.com/theme/abstract-art"
+        spec = json.dumps({"background": "#ffffff", "palette": ["#1D3557"], "fonts": {"heading": "Montserrat", "body": "Lora"},
+                           "shapes": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 12, "fill": "#1D3557"}],
+                           "texts": [{"role": "title", "text": "Abstract Art", "x": 10, "y": 40, "w": 80, "h": 15, "size": 40, "color": "#1D3557"}]})
+        routes = {url: httpx.Response(200, text=page("slidesgo_free.html"), headers=HTML),
+                  url + "/download": httpx.Response(302, headers={"location": "https://slidesgo.com/auth/login"}),
+                  "https://slidesgo.com/auth/login": httpx.Response(200, text="<form>Sign in</form>", headers=HTML)}
+
+        def handler(req):
+            self.seen.append((req.method, str(req.url)))
+            u = str(req.url)
+            if "openrouter.ai" in u:
+                return httpx.Response(200, json={"choices": [{"message": {"content": spec}}],
+                                                 "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+            return routes.get(u) or httpx.Response(404)
+        ti.TRANSPORT = httpx.MockTransport(handler)
+        with mock.patch.object(ti, "rea_command", return_value=["rea"]), mock.patch.object(ti, "find_browsers", return_value=["edge"]), \
+                mock.patch.object(ti, "rea_ready", return_value=True), mock.patch.object(ti, "capture_previews", return_value=[(png(), "image/png")]), \
+                mock.patch.object(ti, "vision_conn", return_value=("https://openrouter.ai/api/v1", "k", "z-ai/glm-4.5v")), mock.patch.object(ti.db, "log_usage"):
+            r = ti.import_link(url)
+        self.assertEqual((r["status"], r["name"]), ("rebuilt", "Abstract Art (rebuilt)"))
+        self.assertEqual([u for m, u in self.seen if m != "GET"], ["https://openrouter.ai/api/v1/chat/completions"])  # the only non-GET is the model call
+        side = json.loads((self.designs_dir / "Abstract Art (rebuilt).pptx.source.json").read_text(encoding="utf-8"))
+        self.assertIn("Slidesgo", side["attribution"])
+        self.assertIn("not an exact copy", side["note"])
 
     def test_read_slide_sends_the_picture_and_parses_fenced_json(self):
         self.llm("Here you go:\n```json\n" + json.dumps(self.SPEC) + "\n```")
@@ -406,6 +463,40 @@ class ReaTest(unittest.TestCase):
         self.assertEqual(entered, [("edge", "https://decks.example.test/pastel"), "stopped"])
         self.assertEqual(len(out), 2)  # the inspected picture and the page's own preview picture
         self.assertEqual(out[0][1], "image/png")
+
+    def test_previews_are_collected_in_slide_order_not_alphabetical(self):
+        def rea(cmd, args, timeout=120):
+            if args[0] == "list-browser-targets":
+                return {"normalized_result": {"targets": [{"target_id": "T1", "type": "page", "url": "https://decks.example.test/pastel"}]}}
+            if args[0] == "inspect-web-page":
+                return {"normalized_result": {"resources": [
+                    {"url": "https://img.example-previews.test/pastel/preview-10.png", "type": "Image", "mime_type": "image/png", "content_size": 40000},
+                    {"url": "https://img.example-previews.test/pastel/preview-2.png", "type": "Image", "mime_type": "image/png", "content_size": 40000},
+                    {"url": "https://img.example-previews.test/pastel/preview-1.png", "type": "Image", "mime_type": "image/png", "content_size": 40000}]}}
+            return {"normalized_result": {"artifact": {}}}  # no screenshot bytes: the pictures alone are enough
+
+        class FakeBrowser:
+            endpoint = "http://127.0.0.1:9333"
+
+            def __init__(self, exe, url):
+                pass
+
+            def start(self):
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+        big = png(400, 300)
+        from urllib.parse import urlparse as up
+        expected = ["cover.png", "preview-1.png", "preview-2.png", "preview-10.png"]
+        ti.TRANSPORT = httpx.MockTransport(lambda req: httpx.Response(200, content=big + req.url.path.encode() * 6000, headers={"content-type": "image/png"}))
+        self.addCleanup(setattr, ti, "TRANSPORT", None)
+        with mock.patch.object(ti, "rea_run", side_effect=rea), mock.patch.object(ti, "Browser", FakeBrowser), mock.patch.object(ti.time, "sleep"):
+            out = ti.capture_previews(["rea"], "edge", "https://decks.example.test/pastel", ["https://img.example-previews.test/pastel/cover.png"])
+        self.assertEqual([len(b) for b, _ in out], [len(big + ("/pastel/" + n).encode() * 6000) for n in expected])
 
     def test_browser_is_stopped_by_its_own_pid_and_its_profile_removed(self):
         tmp = Path(tempfile.mkdtemp())
