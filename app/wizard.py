@@ -25,7 +25,7 @@ import time
 from . import db, designs, gslides, research, simple_pdf, tugas, tugas_decks
 from . import google_api as g
 from .citations import bibliography, process_citations
-from .config import DATA_DIR, get_settings
+from .config import DATA_DIR, get_settings, replace_file
 
 DIR = DATA_DIR / "wizard"
 STEPS = ["content", "design", "mockup", "review", "create"]
@@ -60,7 +60,7 @@ def save(st: dict) -> dict:
         f = _file(st["id"])
         tmp = f.with_suffix(".tmp")
         tmp.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(f)
+        replace_file(tmp, f)
     return st
 
 

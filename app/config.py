@@ -1,9 +1,22 @@
 """Settings storage (data/settings.json) with environment-variable fallbacks."""
 import json
 import os
+import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def replace_file(tmp: Path, dst: Path) -> None:
+    """os.replace that rides out Windows' brief "Access is denied" while OneDrive, antivirus or the indexer holds dst."""
+    for i in range(10):
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:
+            if i == 9:
+                raise
+            time.sleep(0.05 * (i + 1))
 DATA_DIR = Path(os.environ.get("RT_DATA_DIR", BASE_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = DATA_DIR / "settings.json"

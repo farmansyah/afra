@@ -32,7 +32,7 @@ from xml.etree import ElementTree as ET
 import httpx
 
 from . import tugas
-from .config import DATA_DIR, get_settings
+from .config import DATA_DIR, get_settings, replace_file
 
 FILE = DATA_DIR / "designs.json"
 DIR = DATA_DIR / "designs"
@@ -67,7 +67,7 @@ def _write(d: dict):
     FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(d, indent=2), encoding="utf-8")
-    tmp.replace(FILE)
+    replace_file(tmp, FILE)
 
 
 def _rows() -> list[dict]:
@@ -330,7 +330,7 @@ def _folder_info(p: Path) -> dict | None:
         (THUMBS / f"{key}.{info['thumb']}").write_bytes(thumb[1])
     tmp = f.with_suffix(".tmp")
     tmp.write_text(json.dumps(info), encoding="utf-8")
-    tmp.replace(f)
+    replace_file(tmp, f)
     return info
 
 

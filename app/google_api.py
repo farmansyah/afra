@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import httpx
 
-from .config import DATA_DIR
+from .config import DATA_DIR, replace_file
 
 DIR = DATA_DIR / "google"
 AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -77,7 +77,7 @@ def _write(f: Path, obj):
     tmp.write_text(json.dumps(obj, indent=2), encoding="utf-8")
     if os.name != "nt":
         os.chmod(tmp, 0o600)  # tokens: readable by this user only
-    tmp.replace(f)
+    replace_file(tmp, f)
 
 
 # ---------------------------------------------------------------- the OAuth client (pasted by the user)
