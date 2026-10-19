@@ -88,3 +88,21 @@ How it differs from what A.F.R.A has today:
 - Each person connects their own Google account, and several accounts can be connected at once.
 - Decks go into "A.F.R.A Decks" in Drive.
 - PPT Master gives both .pptx and Google Slides.
+
+### Tugas tab (asked 2026-10-19, built on this branch)
+A dedicated **Tugas** page in the sidebar: a Finder-style view of real folders on disk, holding every assignment.
+
+#### Decided (2026-10-19)
+- **Real folders on disk:** default `Documents/A.F.R.A Tugas`, changeable in Settings. File Explorer, Finder and Google Drive for desktop see the same folders.
+- **Free folders:** nothing predefined; people make their own (by mata kuliah, semester, anything) and nest them.
+- **Any files plus A.F.R.A docs:** slides, Word, PDFs, images and the assignment brief, plus links to A.F.R.A documents and papers. A folder can have a due date and a note.
+- **Opening:** a .pptx opens in PowerPoint (the computer's default app) or in Google Slides (upload to "A.F.R.A Decks" and convert, using the Slides studio's Google connection).
+- **Templates from any link:** Slidesgo, SlidesCarnival, Microsoft templates, Canva and others.
+  - Where the site offers the real .pptx for free, A.F.R.A downloads that file (an exact copy), keeping any attribution the free licence asks for.
+  - Where there is only a preview (Canva and similar), REA (`rea-agents`, installed with npm) captures the preview pages and a GLM vision model (through OpenRouter, `z-ai/glm-…`) rebuilds them as an editable .pptx: same layouts, colours and fonts, not pixel-identical.
+  - Free templates only: rebuilding paid templates would get around the site's licence.
+
+#### Build order
+1. Tugas page: folder tree and grid, new folder, rename, move (drag and drop), delete to the Recycle Bin, add files, open in the default app or show in File Explorer, link A.F.R.A documents, due dates.
+2. New deck in a folder from a saved design (the Slides studio's designs), and "Open in Google Slides" for any .pptx.
+3. Template import from links: direct .pptx download first, REA + GLM rebuild second.
