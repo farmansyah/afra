@@ -29,7 +29,7 @@ INSTRUCTIONS = """A.F.R.A is the user's own research library and manuscript tool
 - Documents are Markdown (# headings, **bold**, tables). save_document stores them; export_word makes the .docx.
 - Prefer high-quality sources (Q1/Q2, recent, cited) and say when evidence is thin.
 - A message like "A.F.R.A task <id>" means the user pressed a button in A.F.R.A: call get_task, do it, finish_task
-  (a Slidesgo rebuild task ends with save_design instead).
+  (a Slidesgo or GreatPPT template rebuild task ends with save_design instead).
 - Decks: write the slides yourself and call google_slides_create (Google Slides when an account is connected, and/or an
   editable .pptx). Pick a design with google_slides_templates; get a document's text with slide_material."""
 
@@ -286,7 +286,7 @@ def t_get_task(a):
     fmt = ("Your answer must be valid JSON in exactly the format described above (no commentary)." if t["json"]
            else "Answer with the requested text only (no preface, no closing remarks): it is inserted into A.F.R.A as is.")
     how = f"then call finish_task with task_id \"{t['id']}\" and your answer. {fmt}"
-    if t.get("kind") == "design":  # a Slidesgo rebuild: the answer is a .pptx file, handed back with save_design
+    if t.get("kind") == "design":  # a template rebuild (Slidesgo, GreatPPT): the answer is a .pptx file, handed back with save_design
         how = f"then, when the .pptx is finished, call save_design with task_id \"{t['id']}\" and pptx_path (do not call finish_task)."
     return (f"A.F.R.A task {t['id']} ({t['task']}). The user clicked a button in A.F.R.A and is waiting there.\n"
             f"Do exactly what the instructions say, {how} Don't call other tools unless the instructions need them. In the chat, just say it's done.\n\n"
@@ -312,8 +312,8 @@ def t_save_design(a):
     if data[:4] != b"PK" + bytes([3, 4]):
         raise RuntimeError("That isn't a real .pptx (it is not a zip file). Save the deck as .pptx and try again.")
     r = api("POST", f"/api/designs/rebuilt/{a['task_id']}", files={"file": (p.name, data)}).json()
-    return (f"Saved: \"{r['name']}\" ({r['slides']} slides) is now in the user's A.F.R.A Designs folder with the Slidesgo credit and a "
-            f"\"Rebuilt\" badge. The task is finished. Tell the user in one short sentence, and remind them to keep the credits slide.")
+    return (f"Saved: \"{r['name']}\" ({r['slides']} slides) is now in the user's A.F.R.A Designs folder with the {r.get('site') or 'Slidesgo'} credit and a "
+            f"\"Rebuilt\" badge. The task is finished. Tell the user in one short sentence, and {r.get('remind') or 'remind them to keep the credits slide'}.")
 
 
 def t_pending(_):
@@ -459,7 +459,7 @@ TOOLS = {
     "finish_task": (t_finish_task, "Send the answer of an A.F.R.A task back; it appears in A.F.R.A where the user clicked.",
                     {"task_id": S, "result": {**S, "description": "the answer only (text, or JSON if the task asks for JSON)"}},
                     ["task_id", "result"]),
-    "save_design": (t_save_design, "Hand back the .pptx you rebuilt for an A.F.R.A Slidesgo task (the task text says when). A.F.R.A checks it "
+    "save_design": (t_save_design, "Hand back the .pptx you rebuilt for an A.F.R.A template-rebuild task (Slidesgo, GreatPPT; the task text says when). A.F.R.A checks it "
                     "is a real PowerPoint, saves it in the Designs folder with its credit and finishes the task.",
                     {"task_id": S, "pptx_path": {**S, "description": "full path of the finished .pptx on this computer"}}, ["task_id", "pptx_path"]),
     "pending_tasks": (t_pending, "List A.F.R.A tasks waiting for Claude (when the user says 'do my A.F.R.A tasks').", {}, []),

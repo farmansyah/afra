@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
-from . import designs, google_api, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, wizard
+from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, wizard
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -1187,7 +1187,7 @@ def designs_import_job(jid: str):
 
 @app.post("/api/designs/rebuilt/{tid}")
 async def designs_rebuilt(tid: str, file: UploadFile = File(...)):
-    """Claude hands back the .pptx it rebuilt for a Slidesgo task (the save_design tool): checked, saved, the task finished."""
+    """Claude hands back the .pptx it rebuilt for a Slidesgo / GreatPPT task (the save_design tool): checked, saved, the task finished."""
     return slidesgo.finish_rebuild(tid, await file.read(), file.filename or "")
 
 

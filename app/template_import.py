@@ -48,9 +48,10 @@ CREDIT = {
     "slidesgo": "Template by Slidesgo. The free licence asks you to keep the credits slide (or credit Slidesgo, Flaticon and Freepik).",
     "slidescarnival": "Template by SlidesCarnival. The free licence asks you to keep the credits slide that comes with it.",
     "microsoft": "Template from Microsoft 365 templates.",
+    "greatppt": "Template by GreatPPT (free licence).",
     "gslides": "", "file": "", "canva": "", "other": "",
 }
-SITE_NAME = {"slidesgo": "Slidesgo", "slidescarnival": "SlidesCarnival", "microsoft": "Microsoft", "gslides": "Google Slides", "canva": "Canva"}
+SITE_NAME = {"slidesgo": "Slidesgo", "slidescarnival": "SlidesCarnival", "microsoft": "Microsoft", "greatppt": "GreatPPT", "gslides": "Google Slides", "canva": "Canva"}
 PREMIUM_RE = re.compile(
     r"(premium|paid|pro|plus)[\s-]+(only|members?\b|users?\b|subscribers?\b)|for (premium|pro|paid) (members|users|subscribers)|"
     r"(available|exclusive|reserved)\s+(only\s+)?(to|for)\s+(premium|pro|paid|plus)\b|"
@@ -77,6 +78,8 @@ def classify(url: str) -> str:
         return "slidesgo"
     if host.endswith("slidescarnival.com"):
         return "slidescarnival"
+    if host == "greatppt.com" or host.endswith(".greatppt.com"):
+        return "greatppt"
     if host.endswith(("microsoft.com", "office.com", "cloud.microsoft", "office.net")):
         return "microsoft"
     if host.endswith(("canva.com", "canva.cn")):
@@ -180,6 +183,10 @@ def page_info(html: str, url: str) -> dict:
         free = bool(re.search(r"\bfree\b", unescape(head + " " + desc), re.I))
     cands = candidates(html, url)
     links = pick_candidates(cands, url)
+    if kind == "greatppt":  # its Download button is a form that needs an account: never a direct .pptx link on the page
+        from . import greatppt
+        f = greatppt.page_facts(html)
+        premium, free, why, links, cands = f["price"] is not None and f["price"] > 0, f["free"], "the page has a price" if (f["price"] or 0) > 0 else "", [], []
     m = re.fullmatch(r"(/theme/[^/]+)/?", urlparse(url).path)
     if kind == "slidesgo" and m and not links:  # Slidesgo only names its download address inside scripts
         links = [f"{urlparse(url).scheme}://{urlparse(url).netloc}{m.group(1)}/download"]
@@ -268,6 +275,10 @@ def import_link(url: str, step=lambda s: None) -> dict:
         if urlparse(url).scheme not in ("http", "https") or not public_host(url):
             raise Stop("error", "Paste the web address of a template page (https://…).")
         kind = classify(url)
+        if kind == "greatppt":
+            from . import greatppt
+            if not greatppt.is_template_url(url):
+                raise Stop("no_file", "Paste the link of one GreatPPT template page (greatppt.com/downloads/<template>/).")
         with _client() as h:
             if kind == "gslides":
                 step("Exporting the Google Slides deck…")
@@ -295,6 +306,9 @@ def import_link(url: str, step=lambda s: None) -> dict:
             if info["kind"] == "slidesgo":  # Slidesgo's download needs a sign-in: free templates are rebuilt from the public previews instead
                 from . import slidesgo
                 return {"url": url, **slidesgo.rebuild(str(r.url), r.text, info, step)}
+            if info["kind"] == "greatppt":  # connected: the exact file through the user's own account; else rebuilt from the public previews
+                from . import greatppt
+                return {"url": url, **greatppt.import_page(str(r.url), r.text, info, step)}
             blocked = False
             for link in info["links"][:4]:
                 step("Downloading the template…")
@@ -697,6 +711,20 @@ def run_link(url: str, step=lambda s: None) -> dict:
     return res
 
 
+class Step:
+    """What an import reports its progress to: call it with a text, or user_wait(text) when only the user can go on (a sign-in or
+    a check in a browser window); user_wait("") says the wait is over."""
+
+    def __init__(self, item: dict):
+        self.it = item
+
+    def __call__(self, text: str):
+        self.it.update(step=text)
+
+    def user_wait(self, text: str = ""):
+        self.it.update(state="user" if text else "working", step=text or "Continuing…")
+
+
 def start(links) -> dict:
     urls = designs.split_links(links) if isinstance(links, str) else list(links or [])
     if not urls:
@@ -711,14 +739,15 @@ def start(links) -> dict:
         for it in J["items"]:
             it.update(state="working", step="Starting…")
             try:
-                res = run_link(it["url"], lambda s, it=it: it.update(step=s))
+                res = run_link(it["url"], Step(it))
             except Exception as e:  # one bad link must not stop the others
                 res = {"status": "error", "message": f"Something went wrong ({e.__class__.__name__})."}
             if res.get("status") == "claude":  # handed to the Claude app: done when Claude calls save_design (see job())
                 it.update(state="claude", step="Waiting for Claude", status="", message=res.get("message", ""), name=res.get("name", ""),
-                          task=res["task"], claude_msg=res["claude_msg"])
+                          task=res["task"], claude_msg=res["claude_msg"], hint=res.get("hint", ""))
                 continue
-            it.update(state="done", step="", status=res.get("status", ""), message=res.get("message", ""), name=res.get("name", ""))
+            it.update(state="done", step="", status=res.get("status", ""), message=res.get("message", ""), name=res.get("name", ""),
+                      hint=res.get("hint", ""), site=res.get("site", ""))
         J["dispatched"] = True
     threading.Thread(target=run, daemon=True).start()
     return {"job": jid}
