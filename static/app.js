@@ -2004,6 +2004,36 @@ function designImport(text, out, after) {
     } catch (e) { if (!settled) { settled = true; reject(e); } }
   });
 }
+// GreatPPT account: a visible browser window A.F.R.A opens for the USER to sign in to (A.F.R.A never sees the password). Connected = the exact .pptx.
+function gpWidget(el, compact) {
+  let polling = false;
+  const draw = async () => {
+    if (!el.isConnected) return;
+    let st; try { st = await api("/api/greatppt"); } catch { return; }
+    const note = compact ? "" : ` A browser window opens at GreatPPT's sign-in page. Sign in there yourself (and pass any check it shows); A.F.R.A never sees or stores your password. Tick "Remember me" so the sign-in lasts. Keep the window open (minimise it).`;
+    el.innerHTML = st.connected
+      ? `<div class="small"><span class="pill ok">GreatPPT connected</span> GreatPPT links are downloaded as the original file, free ($0) templates only. <button class="btn small ghost" data-gp="off">Disconnect GreatPPT</button></div>`
+      : st.open ? `<div class="small"><span class="pill warn">Waiting for you</span> Sign in to GreatPPT in the window that opened; this turns to Connected by itself. <button class="btn small ghost" data-gp="off">Cancel</button></div>`
+      : !st.browser ? `<div class="small muted">Connecting GreatPPT needs Microsoft Edge or Google Chrome, and neither was found.</div>`
+      : `<div class="small"><span class="pill gray">GreatPPT not connected</span> Without it, GreatPPT links are rebuilt from the page's previews.${note} <button class="btn small" data-gp="on">Connect GreatPPT</button></div>`;
+    $$("[data-gp]", el).forEach((b) => b.onclick = () => busy(b, async () => {
+      if (b.dataset.gp === "off") { if (!confirm("Disconnect GreatPPT? This closes its window and deletes A.F.R.A's saved GreatPPT sign-in.")) return; await api("/api/greatppt/disconnect", { method: "POST" }); }
+      else await api("/api/greatppt/connect", { method: "POST" });
+      await draw(); poll();
+    }));
+    return st;
+  };
+  const poll = async () => {  // while the window is open, notice the moment the user is signed in
+    if (polling) return; polling = true;
+    for (let i = 0; i < 300 && el.isConnected; i++) {
+      await sleep(3000);
+      let st; try { st = await api("/api/greatppt"); } catch { break; }
+      if (st.connected || !st.open) { await draw(); break; }
+    }
+    polling = false;
+  };
+  return draw().then((st) => { if (st && st.open && !st.connected) poll(); });
+}
 function pdCard(d, sel) {
   return `<div class="dcard${sel ? " sel" : ""}" data-did="${esc(d.id)}" title="${esc(d.name)}"><img src="/api/designs/${encodeURIComponent(d.id)}/thumb?v=${Math.round(d.added || 0)}" alt="" loading="lazy">
     <div class="dmeta"><div class="t">${esc(d.name)}${d.rebuilt ? ` <span class="pill warn" title="${esc(d.credit || "Rebuilt, not the original file")}">Rebuilt</span>` : ""}</div><div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)}</div></div></div>`;
@@ -2050,7 +2080,7 @@ async function gsDesigns(el) {
     <div class="grid g3" style="gap:12px;margin-bottom:12px">
     <div class="card" style="margin:0"><h3>Add from links</h3><p class="small muted" style="margin-top:0">One or several links, one per line, to <b>free</b> templates: Slidesgo, GreatPPT, SlidesCarnival, Microsoft templates, a public Google Slides deck or any template page. A.F.R.A saves the template's own free .pptx into the Designs folder, with its credit. Free Slidesgo and GreatPPT templates (their .pptx needs a sign-in) are <b>rebuilt</b> from their public previews, by a GLM vision model or, in Claude mode, by Claude with PPT Master, and get a <b>Rebuilt</b> badge. It never signs in and skips paid templates.</p>
       <textarea id="dlinks" rows="4" placeholder="https://slidesgo.com/theme/…&#10;https://docs.google.com/presentation/d/…"></textarea>
-      <div class="row" style="margin-top:8px"><button class="btn primary small" id="dadd">Add designs</button></div><div id="dres" class="small" style="margin-top:6px"></div></div>
+      <div class="row" style="margin-top:8px"><button class="btn primary small" id="dadd">Add designs</button></div><div id="gpAdd" style="margin-top:8px"></div><div id="dres" class="small" style="margin-top:6px"></div></div>
     <div class="card" style="margin:0"><h3>Add a PowerPoint</h3><p class="small muted" style="margin-top:0">A .pptx template or any deck you like; it is also saved in the Designs folder. A.F.R.A takes its colours and fonts; in Google Slides it also keeps its real layouts.</p>
       <input type="file" id="dpptx" accept=".pptx"></div>
     <div class="card" style="margin:0"><h3>From colours</h3><input type="text" id="dcname" placeholder="Name">
@@ -2060,6 +2090,7 @@ async function gsDesigns(el) {
       <div class="dgal" style="margin-top:10px">${dl.designs.map((d) => gsCard(d, false)).join("")}</div>
       <div class="small muted" style="margin-top:8px">${esc(dl.how)}</div></div>`;
   const again = () => gsDesigns(el);
+  gpWidget($("#gpAdd"), true);
   $("#dadd").onclick = (e) => busy(e.currentTarget, async () => {
     const txt = $("#dlinks").value;
     if (/docs\.google\.com\/presentation/.test(txt) && !live.length) toast("Google Slides links need a connected Google account; the other links are added now");
@@ -2175,7 +2206,8 @@ VIEWS.settings = async () => {
       <div><label class="f">Downloaded file</label><select id="s_downloads_action"><option value="move"${s.downloads_action === "copy" ? "" : " selected"}>Move into Designs</option><option value="copy"${s.downloads_action === "copy" ? " selected" : ""}>Copy (keep it in Downloads too)</option></select></div>
       <div><label class="f">Folder to watch <small>(empty = your Downloads folder)</small></label><input type="text" id="s_downloads_dir" value="${esc(s.downloads_dir || "")}" placeholder="Your Downloads folder"></div></div>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="savetpl">Save</button><span class="small muted" id="dlwatch"></span></div>
-    <div id="gpBox" style="margin-top:14px"></div></div>
+    <h4 style="margin:14px 0 4px">GreatPPT</h4><p class="small muted" style="margin-top:0">GreatPPT gives its own templates away free under its own licence, but its Download button needs an account. Connect yours and A.F.R.A downloads the original .pptx for you (only $0 templates). Not connected: the template is rebuilt from the page's public previews.</p>
+    <div id="gpBox"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Google Slides and Drive</h3><p class="small muted" style="margin-top:0">Decks are made under <a href="#gslides">Slides</a>. Connect one or more Google accounts here or there.</p><div id="googleBox" class="small muted">Checking…</div></div>
@@ -2301,6 +2333,7 @@ VIEWS.settings = async () => {
   $("#save2").onclick = $("#save3").onclick = $("#savetg").onclick = $("#savetpl").onclick = async () => { await doSave(); watchInfo(); };
   const watchInfo = () => api("/api/downloads/watch").then((w) => { $("#dlwatch").textContent = w.enabled ? `Watching ${w.folder}${w.exists ? "" : " (folder not found)"}` : "The watcher is off."; }).catch(() => { });
   watchInfo();
+  gpWidget($("#gpBox"), false);
   const dfCount = () => api("/api/designs/folder").then((f) => { $("#dfcount").textContent = `${f.count} .pptx file${f.count === 1 ? "" : "s"} in ${f.path}`; }).catch(() => { });
   dfCount();
   $("#opendf").onclick = (e) => busy(e.currentTarget, async () => { await doSave(true); await api("/api/designs/folder/open", { method: "POST" }); dfCount(); });
