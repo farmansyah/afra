@@ -2252,7 +2252,9 @@ VIEWS.settings = async () => {
       + (c.blocked ? `<div style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px">
          <b>Windows didn't let A.F.R.A change Claude's settings, so add it by hand (one time):</b>
          <ol style="margin:6px 0;padding-left:18px"><li>In Claude, open <b>Settings → Developer → Edit Config</b>. This opens <code>claude_desktop_config.json</code>.</li>
-         <li>Inside <code>"mcpServers": { … }</code>, paste the lines below. If other servers are already listed, put a comma after the one before it. If the file has no <code>"mcpServers"</code> yet, make it <code>{ "mcpServers": { <i>the lines below</i> } }</code>.</li>
+         <li>${c.snippet.trimStart().startsWith('"mcpServers"')
+           ? `Put the cursor right after the very first <code>{</code> at the top of the file, press Enter and paste the lines below (keep the comma at the end).`
+           : `Inside <code>"mcpServers": { … }</code>, paste the lines below, and put a comma after the server listed before it.`}</li>
          <li>Save the file, quit Claude completely and open it again.</li></ol>
          <pre id="claudesnip" style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin:6px 0">${esc(c.snippet)}</pre>
          <button class="btn" id="claudecopy">Copy</button></div>` : "");

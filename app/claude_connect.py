@@ -49,8 +49,12 @@ def status() -> dict:
 
 
 def snippet() -> str:
-    """The lines to paste inside "mcpServers" in Claude's settings when A.F.R.A can't write the file itself."""
-    return json.dumps({NAME: entry()}, indent=2)[1:-1].strip("\n")
+    """What to paste in Claude's settings when A.F.R.A can't write the file itself: the A.F.R.A entry alone
+    if the file already has "mcpServers", otherwise the whole section, pasted right after the first {."""
+    cfg = next((c for c in map(_read, config_files()) if c), {})
+    if "mcpServers" in cfg:
+        return json.dumps({NAME: entry()}, indent=2)[1:-1].strip("\n")
+    return json.dumps({"mcpServers": {NAME: entry()}}, indent=2)[1:-1].strip("\n") + ","
 
 
 def connect() -> dict:
