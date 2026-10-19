@@ -91,6 +91,31 @@ class Slide:
                           f'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="{int(bool(header))}" bandRow="1"/>'
                           f'<a:tblGrid>{grid}</a:tblGrid>{"".join(trs)}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>')
 
+    def bar_chart(self, x0, y0, w, h, labels, values, t):
+        """A simple bar chart from real shapes (rectangles and text boxes), so it stays editable in PowerPoint."""
+        vals = []
+        for v in values[:12]:
+            try:
+                vals.append(float(v))
+            except (TypeError, ValueError):
+                vals.append(0.0)
+        labels = [str(x) for x in labels[:len(vals)]] + [""] * (len(vals) - len(labels))
+        top, bottom = max(max(vals), 0), min(min(vals), 0)
+        span = (top - bottom) or 1
+        px, py, pw, ph = x0 + 8, y0 + 18, w - 16, h - 18 - 44  # plot area; 44 pt below it for the category names
+        zero = py + ph * top / span
+        step = pw / len(vals)
+        bw = step * 0.62
+        for i, v in enumerate(vals):
+            bh = max(abs(v) / span * ph, 1)
+            bx = px + i * step + (step - bw) / 2
+            by = zero - bh if v >= 0 else zero
+            self.rect(bx, by, bw, bh, t["accent2"], solid_line=True)
+            shown = f"{v:g}"
+            self.text(bx - 12, (by - 18) if v >= 0 else (by + bh), bw + 24, 18, [(shown, {"font": t["body_font"], "color": t["text"], "size": 10, "align": "ctr"})], name="Value")
+            self.text(px + i * step, py + ph + 4, step, 40, [(labels[i], {"font": t["body_font"], "color": t["muted"], "size": 10, "align": "ctr"})], name="Label")
+        self.rect(px, zero, pw, 1, t["muted"], solid_line=True)
+
     def picture(self, x0, y0, w, h, data: bytes, ext: str):
         i = self._id()
         iw, ih = image_size(data) or (w, h)
@@ -121,7 +146,7 @@ def _para(text, st: dict) -> str:
         ppr.append(f'<a:pPr{al}>{sp}<a:buNone/></a:pPr>')
     else:
         ppr.append("<a:pPr><a:buNone/></a:pPr>")
-    rpr = (f'<a:rPr lang="en-US" sz="{int(st.get("size", 18) * 100)}" b="{int(bool(st.get("bold")))}" dirty="0">'
+    rpr = (f'<a:rPr lang="en-US" sz="{int(st.get("size", 18) * 100)}" b="{int(bool(st.get("bold")))}" i="{int(bool(st.get("italic")))}" dirty="0">'
            f'<a:solidFill><a:srgbClr val="{c(st.get("color", "#000000"))}"/></a:solidFill>'
            f'<a:latin typeface="{x(st.get("font", "Arial"))}"/><a:cs typeface="{x(st.get("font", "Arial"))}"/></a:rPr>')
     run = f'<a:r>{rpr}<a:t>{x(text)}</a:t></a:r>' if str(text or "") else ""
@@ -151,7 +176,7 @@ def image_size(data: bytes) -> tuple[int, int] | None:
 
 # ---------------------------------------------------------------- one slide per layout
 def render(s: dict, t: dict, number: int, images: dict) -> tuple[Slide, list[str]]:
-    from .gslides import slide_texts  # same text for both engines
+    from .gslides import overflows, slide_texts  # same text for both engines
     L = s.get("layout", "content")
     dark = L in ("title", "section", "closing")
     sl = Slide(t["dark"] if dark else t["light"])
@@ -167,16 +192,43 @@ def render(s: dict, t: dict, number: int, images: dict) -> tuple[Slide, list[str
             sl.text(48, 232 if L != "section" else 240, 624, 70, [(tx["subtitle"], {"font": t["body_font"], "color": t["accent"], "size": 18})], name="Subtitle")
         return sl, notes
     sl.rect(40, 80, 56, 4, t["accent"])
-    sl.text(40, 20, 640, 56, [(tx["title"], {**head, "size": 26})], anchor="b", name="Title")
+    if tx["title"] or L != "quote":
+        sl.text(40, 20, 640, 56, [(tx["title"], {**head, "size": 26})], anchor="b", name="Title")
     sl.text(640, 380, 64, 20, [(str(number), {"font": t["body_font"], "color": t["muted"], "size": 10, "align": "r"})], name="Slide number")
+    if (s.get("source") or "").strip():
+        sl.text(40, 380, 590, 20, [("Source: " + s["source"].strip(), {"font": t["body_font"], "color": t["muted"], "size": 10})], name="Source")
     bullets = lambda items, size=18: [(b, {**body, "size": size, "bullet": True, "bullet_color": t["accent2"], "space": 6 if size > 12 else 2}) for b in items]
+    fit = lambda items, w, h, sizes=(18, 16, 14, 12, 11): next((z for z in sizes if not overflows(chr(10).join(items), w - 34, h - 8, z)), sizes[-1])
+    figure = s.get("figure") or {}
+    placed = lambda area: (sl.picture(*area, *images[figure["url"]]) if images.get(figure.get("url", "")) else
+                           (sl.rect(*area, "#F1F3F6", "#B8BFCC"),
+                            sl.text(*area, [("Picture: " + figure["description"] if figure.get("description") else "Figure",
+                                             {"font": t["body_font"], "color": t["muted"], "size": 14, "align": "ctr"})], anchor="ctr", name="Placeholder"),
+                            notes.append("no picture yet: add it by hand")))
     if L in ("content", "references"):
-        size = 11 if L == "references" else 18
-        sl.text(40, 96 if L == "content" else 90, 640, 284 if L == "content" else 296, bullets(s.get("bullets") or [], size), name="Body")
+        items = s.get("bullets") or []
+        size = 11 if L == "references" else fit(items, 640, 284)
+        sl.text(40, 96 if L == "content" else 90, 640, 284 if L == "content" else 296, bullets(items, size), name="Body")
     elif L == "two_column":
         for x0, col in ((40, s.get("left") or {}), (370, s.get("right") or {})):
-            paras = ([(col["heading"], {**body, "bold": True, "color": t["accent2"], "size": 18})] if col.get("heading") else []) + bullets(col.get("bullets") or [], 16)
+            size = fit(col.get("bullets") or [], 310, 250, (16, 14, 12, 11))
+            paras = ([(col["heading"], {**body, "bold": True, "color": t["accent2"], "size": 18})] if col.get("heading") else []) + bullets(col.get("bullets") or [], size)
             sl.text(x0, 96, 310, 284, paras, name="Column")
+    elif L in ("image_left", "image_right"):
+        items = s.get("bullets") or []
+        pic, txt = ((40, 96, 300, 250), (360, 96, 320, 284)) if L == "image_left" else ((380, 96, 300, 250), (40, 96, 320, 284))
+        sl.text(*txt, bullets(items, fit(items, 320, 284, (18, 16, 14, 12))), name="Body")
+        placed(pic)
+        if tx.get("caption"):
+            sl.text(pic[0], 350, pic[2], 28, [(tx["caption"], {"font": t["body_font"], "color": t["muted"], "size": 12})], name="Caption")
+    elif L == "quote":
+        q = s.get("quote") or {}
+        text = q.get("text") or ""
+        sl.text(40, 84, 80, 80, [("“", {"font": t["heading_font"], "color": t["accent"], "size": 96, "bold": True})], name="Mark")
+        sl.text(100, 120, 560, 190, [(text, {"font": t["heading_font"], "color": t["text"], "italic": True,
+                                             "size": next((z for z in (30, 26, 22, 18) if not overflows(text, 560 - 20, 182, z)), 18)})], anchor="ctr", name="Quote")
+        if q.get("by"):
+            sl.text(100, 318, 560, 30, [("— " + q["by"], {"font": t["body_font"], "color": t["muted"], "size": 16})], name="By")
     elif L in ("figure", "chart", "table"):
         cap = tx.get("caption", "")
         if L == "table":
@@ -184,13 +236,19 @@ def render(s: dict, t: dict, number: int, images: dict) -> tuple[Slide, list[str
         else:
             area, cap_box = (40, 96, 420, 276), (476, 96, 204, 276)
         tb = s.get("table") or {}
-        img = images.get((s.get("figure") or {}).get("url", ""))
+        ch = s.get("chart") or {}
+        img = images.get(figure.get("url", ""))
         if L == "table" and tb.get("rows"):
             sl.table(*area, tb.get("header") or [], tb["rows"], t)
+        elif L == "chart" and ch.get("values") and ch.get("labels"):
+            sl.bar_chart(*area, ch["labels"], ch["values"], t)
+            cap = cap or ch.get("label", "")
         elif L == "figure" and img:
             sl.picture(*area, *img)
         else:
             what = {"chart": "Chart: insert it from the Google Sheet (Insert › Chart › From Sheets)", "table": "Table"}.get(L, "Figure")
+            if figure.get("description") and L == "figure":
+                what = "Picture: " + figure["description"]
             sl.rect(*area, "#F1F3F6", "#B8BFCC")
             sl.text(*area, [(what, {"font": t["body_font"], "color": t["muted"], "size": 14, "align": "ctr"})], anchor="ctr", name="Placeholder")
             notes.append(f"no {L} to insert in the PowerPoint: add it by hand")
@@ -369,7 +427,7 @@ def build_from_spec(deck: dict, title: str = "", thumbnail: tuple[bytes, str] | 
 def fetch_images(slides: list[dict]) -> dict:
     """The pictures the user linked for figure slides (PNG/JPEG, up to 8 MB each)."""
     out = {}
-    urls = {(s.get("figure") or {}).get("url", "") for s in slides if s.get("layout") == "figure"}
+    urls = {(s.get("figure") or {}).get("url", "") for s in slides if s.get("layout") in ("figure", "image_left", "image_right")}
     with httpx.Client(timeout=20, follow_redirects=True, transport=designs.TRANSPORT, headers={"User-Agent": designs.UA}) as h:
         for u in [u for u in urls if u.startswith(("http://", "https://"))]:
             try:

@@ -209,13 +209,14 @@ async function studioPanel(el, ctx = {}) {
 }
 const EXEC = [/^\/api\/tools\/(run|ask-library|suggest-citations)$/, /^\/api\/papers\/[^/]+\/summarize$/,
   /^\/api\/paper\/[^/]+\/(style-guide|literature|outline|review|section\/\d+|abstract)$/, /^\/api\/gaps\/[^/]+\/write$/,
-  /^\/api\/decks\/(outline|content)$/, /^\/api\/decks\/[^/]+\/redo$/];
+  /^\/api\/decks\/(outline|content)$/, /^\/api\/decks\/[^/]+\/redo$/, /^\/api\/wizard\/[^/]+\/(analyze|mockup|rewrite|essay\/revise)$/];
 function execLabel(path, body = {}) {
   if (path === "/api/tools/run") return S.meta?.tools?.[body.tool] || "Writing tool";
   if (path === "/api/tools/ask-library") return "Ask your library";
   if (path === "/api/tools/suggest-citations") return "Suggest citations";
   if (path.endsWith("/summarize")) return "Reading notes";
   if (path.startsWith("/api/gaps/")) return "Gap analysis write-up";
+  if (path.startsWith("/api/wizard/")) return "Create into PPT: " + ({ analyze: "read your documents", mockup: "write the mockup", rewrite: "rewrite a slide", revise: "change the essay" }[path.split("/").pop()] || "AI step");
   if (path.startsWith("/api/decks/")) return "Slides: " + (path.endsWith("/outline") ? "outline" : path.endsWith("/content") ? "write the slides" : "rewrite a slide");
   const step = (path.match(/\/api\/paper\/[^/]+\/([a-z-]+)/) || [])[1] || "";
   return "Paper Writer: " + ({ "style-guide": "style guide", literature: "literature synthesis", outline: "outline", review: "reviewer check", section: "section draft", abstract: "title & abstract" }[step] || step);
@@ -1016,7 +1017,7 @@ async function paperDialog(id, onChange) {
     <div class="card" style="margin:12px 0 0;padding:10px 12px"><div class="row" style="justify-content:space-between"><div><b>PDF</b> <span class="small muted">${p.has_pdf ? "attached" : "not attached"}${p.fulltext ? ` · full text ${p.fulltext.length.toLocaleString()} characters` : ""}${p.quotes ? ` · ${p.quotes} quotes/notes` : ""}</span></div>
       <div class="row">${p.has_pdf ? `<button class="btn small primary" id="pread">Open reader</button>` : `<button class="btn small" id="pfetch">Find open-access PDF</button>`}<label class="btn small">${p.has_pdf ? "Replace" : "Attach"} PDF<input type="file" id="pattach" accept=".pdf" hidden></label></div></div></div>
     <div class="modal-foot" style="justify-content:space-between"><div class="row"><button class="btn danger" id="pdel">Delete</button>
-      <button class="btn ghost" id="pshare">💬 Share in chat</button><button class="btn" id="psum">AI reading notes</button>${p.doi || p.openalex_id ? `<button class="btn ghost" data-psb="references">References</button><button class="btn ghost" data-psb="citing">Cited by</button><button class="btn ghost" data-psb="related">Related</button>` : ""}${!p.fulltext && (p.pdf_url || p.url) ? `<button class="btn" id="pft">Fetch full text</button>` : ""}</div>
+      <button class="btn ghost" id="pshare">💬 Share in chat</button><button class="btn ghost" id="pppt">Create into PPT</button><button class="btn" id="psum">AI reading notes</button>${p.doi || p.openalex_id ? `<button class="btn ghost" data-psb="references">References</button><button class="btn ghost" data-psb="citing">Cited by</button><button class="btn ghost" data-psb="related">Related</button>` : ""}${!p.fulltext && (p.pdf_url || p.url) ? `<button class="btn" id="pft">Fetch full text</button>` : ""}</div>
       <div class="row"><button class="btn" onclick="closeModal()">Close</button><button class="btn primary" id="psave">Save</button></div></div>`, true);
   $("#cpk", box).onclick = () => { copyAnd(`[@${p.key}]`, "Copied"); };
   $$("[data-psb]", box).forEach((b) => b.onclick = () => { S.snowball = { ident: p.openalex_id || p.doi, mode: b.dataset.psb, title: p.title }; closeModal(); if (location.hash === "#search") route(); else location.hash = "#search"; });
@@ -1027,6 +1028,7 @@ async function paperDialog(id, onChange) {
     await api(`/api/papers/${id}`, { method: "PUT", body }); closeModal(); toast("Saved", "ok"); onChange && onChange();
   });
   $("#pdel", box).onclick = async () => { if (!confirm("Remove this paper from the library?")) return; await api(`/api/papers/${id}`, { method: "DELETE" }); closeModal(); onChange && onChange(); };
+  $("#pppt", box).onclick = () => { closeModal(); startWizard({ mode: "paper", paper_id: id }); };
   $("#pshare", box).onclick = () => {
     const au = (p.authors || []).map((a) => a.family || a.given).filter(Boolean);
     const who = au.length > 2 ? au[0] + " et al." : au.join(" & ");
@@ -1283,7 +1285,7 @@ async function docEditor(id) {
   main().innerHTML = `
   <div class="page-head"><div class="row grow"><a href="#docs" class="btn ghost">← Documents</a><input type="text" id="dtitle" value="${esc(doc.title)}" style="font:600 18px var(--serif);max-width:640px"></div><span class="muted small" id="dsaved">Saved</span></div>
   <div class="toolbar">
-    <button class="btn small primary" id="dexp">Export DOCX</button><button class="btn small" id="dslides">Slides</button><button class="btn small" id="dcite">Insert citation</button>
+    <button class="btn small primary" id="dexp">Export DOCX</button><button class="btn small" id="dslides">Slides</button><button class="btn small" id="dppt">Create into PPT</button><button class="btn small" id="dcite">Insert citation</button>
     <button class="btn small" id="dsugg">Suggest citations</button><button class="btn small" id="dqc">Quality check</button><button class="btn small" id="dsim">Similarity</button><button class="btn small" id="dev" title="Select an argument in the editor; find papers that back it">Find evidence</button><button class="btn small" id="dref">Check references</button><button class="btn small" id="dfit">Journal fit</button>
     <span class="sep"></span>
     <select id="dtool" style="width:210px">${Object.entries(S.meta.tools).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
@@ -1325,6 +1327,7 @@ async function docEditor(id) {
   $("#dlayout").onchange = (e) => { const v = e.target.value; $("#dwrap").className = "editor-wrap" + (v === "split" ? "" : " single"); ta.style.display = v === "preview" ? "none" : ""; $("#dprev").style.display = v === "edit" ? "none" : ""; };
   $("#dexp").onclick = () => exportDialog({ markdown: ta.value, meta: { title: "", doc_type: doc.meta?.doc_type, lang: doc.meta?.lang }, template: doc.meta?.template, filenameHint: $("#dtitle").value });
   $("#dslides").onclick = () => { const box = modal(`<h2>Make slides</h2><div id="slp" class="small muted">Loading…</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`, true); slidesPanel($("#slp", box), $("#dtitle").value); };
+  $("#dppt").onclick = () => startWizard({ mode: "doc", doc_id: id });
   $("#dcite").onclick = () => citePicker((c) => insertAtCursor(ta, c));
   $("#dshare").onclick = () => {
     const body = ta.value.replace(/^#.*$/m, "").replace(/\[@[^\]]*\]/g, "").replace(/[#*_>`]/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -1831,7 +1834,7 @@ async function gsDownload(id, fmt) {
 }
 
 VIEWS.gslides = async () => {
-  main().innerHTML = `<div class="page-head"><div><h1>Slides</h1><p>Turn readings, documents and notes into a presentation: an outline you edit, then the slides, built as <b>Google Slides</b> in your Drive and/or an editable <b>PowerPoint</b> file, in a design you choose.</p></div><div id="gschip"></div></div>
+  main().innerHTML = `<div class="page-head"><div><h1>Slides</h1><p>Turn readings, documents and notes into a presentation: an outline you edit, then the slides, built as <b>Google Slides</b> in your Drive and/or an editable <b>PowerPoint</b> file, in a design you choose.</p></div><div class="row"><a class="btn primary" href="#create">Create into PPT</a><span id="gschip"></span></div></div>
   ${needLLM()}
   <div class="tabs" id="gstabs">${[["new", "New deck"], ["designs", "Designs"], ["decks", "My decks"], ["ppt", "PowerPoint files"], ["acc", "Google accounts"]].map(([k, v]) => `<button data-t="${k}" class="${k === GS.tab ? "active" : ""}">${v}</button>`).join("")}</div>
   <div id="gsbody"></div>`;
@@ -2560,52 +2563,10 @@ async function tgUseDesign(it) {
   const r = await api("/api/tugas/use-as-design", { body: { path: it.path } });
   toast(`"${r.name}" is now a design (Designs folder)`, "ok");
 }
-// New deck: pick a design, then a title and where the slides come from. The saving is one call (/api/tugas/deck).
-async function tgNewDeck() {
+// New deck opens the Create into PPT wizard with this folder preset (its quick path: a blank deck or one of your documents)
+function tgNewDeck() {
   if (!T.path) return toast("Open a folder first: the deck is saved inside it");
-  const design = await pickDesign({ title: "New deck: pick a design", button: "Next" });
-  if (design) tgDeckForm(design);
-}
-async function tgDeckForm(design) {
-  const here = T.data.links.filter((l) => l.type === "doc");
-  const all = await api(`/api/projects/${S.project.id}/documents?kind=doc`).catch(() => []);
-  const opt = (id, title, pid) => `<option value="${esc(id)}" data-pid="${esc(pid)}">${esc(title)}</option>`;
-  const box = modal(`<h2>New deck</h2><p class="small muted" style="margin-top:0">Saved in <b>${esc(T.path)}</b> as a .pptx.</p>
-    <div class="row" style="gap:12px;align-items:flex-start"><div style="width:150px">${pdCard(design, true)}</div><div class="grow">
-      <button class="btn small ghost" id="ndch">Change design</button>
-      <label class="f">Title</label><input type="text" id="ndt" value="${esc(tgBase(T.path))}">
-      <label class="f">Slides from</label><select id="nds"><option value="">Blank outline (fill it in PowerPoint)</option>
-        ${here.length ? `<optgroup label="Linked to this folder">${here.map((l) => opt(l.id, l.title, l.project_id)).join("")}</optgroup>` : ""}
-        ${all.length ? `<optgroup label="Documents in ${esc(S.project.name)}">${all.map((d) => opt(d.id, d.title, S.project.id)).join("")}</optgroup>` : ""}</select>
-      <div class="small muted" style="margin-top:4px" id="ndn">A document is turned into an outline and slides by the AI, like on the Slides page.</div></div></div>
-    <div id="ndst" class="small" style="margin-top:10px"></div>
-    <div class="modal-foot"><button class="btn" id="tgx">Cancel</button><button class="btn primary" id="tgok">Create deck</button></div>`);
-  $("#tgx", box).onclick = closeModal;
-  $("#ndch", box).onclick = async () => { const d = await pickDesign({ selected: design.id, title: "New deck: pick a design", button: "Next" }); if (d) tgDeckForm(d); };
-  $("#tgok", box).onclick = (e) => busy(e.currentTarget, async () => {
-    const title = $("#ndt", box).value.trim(), sel = $("#nds", box), st = $("#ndst", box);
-    if (!title) return toast("Give the deck a title");
-    const body = { path: T.path, design_id: design.id, title };
-    if (sel.value) {
-      const o = sel.selectedOptions[0], mat = { project_id: o.dataset.pid, title, topic: o.textContent, document_id: sel.value, minutes: 10, tone: "academic", notes: true };
-      st.innerHTML = `<span class="spin"></span> Writing the outline…`;
-      const outline = await api("/api/decks/outline", { body: mat });
-      st.innerHTML = `<span class="spin"></span> Writing ${outline.slides.length} slides…`;
-      body.slides = (await api("/api/decks/content", { body: { ...mat, outline } })).slides;
-    } else body.source = { type: "blank" };
-    st.innerHTML = `<span class="spin"></span> Starting…`;
-    const { job } = await api("/api/tugas/deck", { body });
-    for (; ;) {
-      const j = await api("/api/tugas/deck/jobs/" + job);
-      if (j.state === "error") { st.innerHTML = `<span class="pill bad">Failed</span> ${esc(j.error)}`; return; }
-      if (j.state === "done") {
-        closeModal(); T.sel = new Set([j.result.path]); await tgLoad(T.path, true); T.sel = new Set([j.result.path]); tgRender(); tgSelBar();
-        return toast(`Saved “${j.result.name}” in this folder`, "ok");
-      }
-      st.innerHTML = `<span class="spin"></span> ${esc(j.step)}`;
-      await sleep(900);
-    }
-  });
+  openWizardIn(T.path);
 }
 const tgOpen = (it) => it.kind === "folder" ? (location.hash = tgUrl(it.path)) : api("/api/tugas/open", { body: { path: it.path } }).catch((e) => toast(e.message, "bad"));
 function tgContext(e) {

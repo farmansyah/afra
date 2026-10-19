@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
-from . import designs, google_api, gslides, pptx_build, template_import, tugas, tugas_decks
+from . import designs, google_api, gslides, pdf_design, pptx_build, template_import, tugas, tugas_decks, wizard
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -1185,6 +1185,15 @@ async def designs_add_pptx(file: UploadFile = File(...)):
     return designs.add_pptx(data, file.filename)
 
 
+@app.post("/api/designs/pdf")
+async def designs_add_pdf(file: UploadFile = File(...)):
+    """Slides exported as PDF: colours and fonts read from the drawing commands, or layouts from page pictures with the GLM vision step."""
+    data = await file.read()
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise ValueError("Upload slides exported as a PDF file.")
+    return await asyncio.to_thread(pdf_design.import_pdf, data, file.filename)
+
+
 @app.post("/api/designs/colors")
 def designs_add_colors(body: dict):
     return designs.from_colors(body.get("name", ""), body.get("colors") or [], body.get("fonts") or [])
@@ -1435,6 +1444,135 @@ async def tugas_google_slides(body: dict):
 @app.put("/api/tugas/meta")
 def tugas_meta(body: dict):
     return tugas.set_meta(body.get("path", ""), body.get("due"), body.get("note"), body.get("docs"), body.get("papers"))
+
+
+# ---------------------------------------------------------------- Create into PPT (the wizard)
+@app.get("/api/wizard")
+def wizard_list():
+    return wizard.listing()
+
+
+@app.post("/api/wizard")
+def wizard_new(body: dict):
+    """mode: topic | upload | doc | paper | blank. A draft is saved on disk, so closing the page and coming back resumes it."""
+    return wizard.public(wizard.new(body))
+
+
+@app.get("/api/wizard/jobs/{jid}")
+def wizard_job(jid: str):
+    return wizard.job(jid)
+
+
+@app.get("/api/wizard/{wid}")
+def wizard_get(wid: str):
+    return wizard.public(wizard.load(wid))
+
+
+@app.put("/api/wizard/{wid}")
+def wizard_put(wid: str, body: dict):
+    return wizard.public(wizard.patch(wid, body))
+
+
+@app.delete("/api/wizard/{wid}")
+def wizard_delete(wid: str):
+    wizard.delete(wid)
+    return {"ok": True}
+
+
+@app.post("/api/wizard/{wid}/essay/start")
+async def wizard_essay_start(wid: str):
+    return await wizard.start_essay(wid)
+
+
+@app.get("/api/wizard/{wid}/essay")
+def wizard_essay(wid: str):
+    return wizard.essay_status(wid)
+
+
+@app.get("/api/wizard/{wid}/essay/candidates")
+def wizard_essay_candidates(wid: str):
+    return wizard.essay_candidates(wid)
+
+
+@app.post("/api/wizard/{wid}/essay/attach")
+def wizard_essay_attach(wid: str, body: dict):
+    return wizard.public(wizard.attach_essay(wid, body.get("doc_id", "")))
+
+
+@app.post("/api/wizard/{wid}/essay/approve")
+def wizard_essay_approve(wid: str, body: dict):
+    return wizard.public(wizard.approve_essay(wid, body.get("approved", True)))
+
+
+@app.post("/api/wizard/{wid}/essay/revise")
+async def wizard_essay_revise(wid: str, body: dict):
+    return await wizard.revise_essay(wid, body.get("instruction", ""))
+
+
+@app.get("/api/wizard/{wid}/essay/export")
+async def wizard_essay_export(wid: str, fmt: str = "pdf"):
+    if fmt not in ("pdf", "docx"):
+        raise ValueError("Export as pdf or docx.")
+    data, name = await asyncio.to_thread(wizard.export_pdf if fmt == "pdf" else wizard.export_docx, wid)
+    return _attach(data, name, "application/pdf" if fmt == "pdf" else google_api.MIME_DOCX)
+
+
+@app.post("/api/wizard/{wid}/essay/google-doc")
+async def wizard_essay_google_doc(wid: str, body: dict):
+    return await asyncio.to_thread(wizard.export_google_doc, wid, body.get("account") or None)
+
+
+@app.post("/api/wizard/{wid}/materials")
+async def wizard_material(wid: str, file: UploadFile = File(...)):
+    data = await file.read()
+    return await asyncio.to_thread(wizard.add_material, wid, file.filename or "file.txt", data)
+
+
+@app.post("/api/wizard/{wid}/materials/google-doc")
+async def wizard_material_google(wid: str, body: dict):
+    return await asyncio.to_thread(wizard.add_google_doc, wid, body.get("link", ""), body.get("account") or None)
+
+
+@app.delete("/api/wizard/{wid}/materials/{mid}")
+def wizard_material_delete(wid: str, mid: str):
+    wizard.remove_material(wid, mid)
+    return {"ok": True}
+
+
+@app.post("/api/wizard/{wid}/analyze")
+async def wizard_analyze(wid: str):
+    return await wizard.analyze(wid)
+
+
+@app.post("/api/wizard/{wid}/mockup")
+async def wizard_mockup(wid: str):
+    """Source -> wireframes (two AI steps: the outline, then the slides). A blank source needs no AI."""
+    return await wizard.make_mockup(wid)
+
+
+@app.put("/api/wizard/{wid}/mockup")
+def wizard_mockup_save(wid: str, body: dict):
+    return wizard.save_mockup(wid, body)
+
+
+@app.post("/api/wizard/{wid}/mockup/op")
+def wizard_mockup_op(wid: str, body: dict):
+    return wizard.edit_mockup(wid, body, body.get("mockup"))
+
+
+@app.post("/api/wizard/{wid}/rewrite")
+async def wizard_rewrite(wid: str, body: dict):
+    return await wizard.rewrite(wid, body.get("index"), body.get("instruction", ""), body.get("layout", ""))
+
+
+@app.get("/api/wizard/{wid}/review")
+def wizard_review(wid: str):
+    return wizard.review(wid)
+
+
+@app.post("/api/wizard/{wid}/create")
+def wizard_create(wid: str):
+    return wizard.start_create(wid)
 
 
 # ---------------------------------------------------------------- frontend

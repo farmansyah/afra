@@ -33,6 +33,9 @@ from .citations import bibliography, process_citations
 from .llm import complete_json
 
 LAYOUTS = ["title", "section", "content", "two_column", "figure", "table", "chart", "references", "closing"]
+# layouts only the PowerPoint wizard (wizard.py) asks for; the Google template path bends them onto LAYOUTS (FALLBACK)
+EXTRA_LAYOUTS = ["quote", "image_left", "image_right"]
+KNOWN = LAYOUTS + EXTRA_LAYOUTS
 THEME = designs.THEME
 EMU = 12700  # per point
 PAGE = (720, 405)  # 16:9 in points
@@ -52,7 +55,8 @@ ROLES = {"hero": (40, True, "heading"), "h1": (34, True, "heading"), "h2": (26, 
          "body": (18, False, "body"), "small": (13, False, "body"), "refs": (11, False, "body"), "area": (12, False, "body")}
 DARK = {"title", "section", "closing"}
 FALLBACK = {"two_column": "content", "figure": "content", "table": "content", "chart": "content", "references": "content",
-            "closing": "section", "section": "title", "title": "section", "content": "section"}
+            "closing": "section", "section": "title", "title": "section", "content": "section",
+            "quote": "content", "image_left": "figure", "image_right": "figure"}
 MAX_BULLETS, MAX_CHARS, MAX_ROWS, MAX_COLS = 6, 160, 10, 6
 TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
 MATERIALS: dict[str, dict] = {}  # uploaded PDFs/notes for the next deck, in memory only
@@ -298,8 +302,14 @@ def slide_texts(s: dict) -> dict:
         t["body"] = "\n".join(s.get("bullets") or [])
     if L == "two_column":
         t["left"], t["right"] = _col(s.get("left")), _col(s.get("right"))
-    if L in ("figure", "table", "chart"):
+    if L in ("figure", "table", "chart", "image_left", "image_right"):
         t["caption"] = s.get("caption") or (s.get("figure") or {}).get("caption", "")
+    if L in ("image_left", "image_right"):
+        t["body"] = chr(10).join(s.get("bullets") or [])
+    if L == "quote":
+        q = s.get("quote") or {}
+        t["body"] = q.get("text", "")
+        t["subtitle"] = t["subtitle"] or q.get("by", "")
     return t
 
 
@@ -321,6 +331,9 @@ def as_layout(s: dict, available) -> tuple[dict, str]:
             s2["bullets"] = [" | ".join(map(str, r)) for r in ([tb.get("header")] if tb.get("header") else []) + list(tb.get("rows") or [])]
         elif s.get("layout") in ("figure", "chart"):
             s2["bullets"] = [x for x in [s.get("caption", "")] if x]
+        elif s.get("layout") == "quote":
+            q = s.get("quote") or {}
+            s2["bullets"] = [x for x in [q.get("text", ""), ("- " + q["by"]) if q.get("by") else ""] if x]
     return s2, f"the template has no {s.get('layout')} layout, used {L}"
 
 
@@ -351,7 +364,7 @@ def fit_slides(slides: list[dict], max_bullets: int = MAX_BULLETS, max_chars: in
         flags.append({"slide": len(out) + 1, "issue": issue})
 
     for s in slides:
-        s = {**s, "layout": s.get("layout") if s.get("layout") in LAYOUTS else "content"}
+        s = {**s, "layout": s.get("layout") if s.get("layout") in KNOWN else "content"}
         if len(s.get("title") or "") > 90:
             s["title"] = _trim(s["title"], 90)
             flag("title shortened")
@@ -792,6 +805,10 @@ LAYOUT_HELP = """- title: first slide (title + subtitle)
 - figure: ONLY an image listed under "Image links you can place"
 - references: the source list (A.F.R.A writes it from the citations; give no bullets)
 - closing: last slide (take-home message, questions)"""
+# what the PowerPoint wizard (wizard.py) adds: native charts and pictures that are slots, plus the three extra layouts
+WIZARD_HELP = LAYOUT_HELP.replace('- chart: ONLY a chart listed under "Charts you can place"', '- chart: ONLY when the material has numbers to compare; give them as data (see the rules)')     .replace('- figure: ONLY an image listed under "Image links you can place"', '- figure: a picture that fills the slide; ONLY when a picture would help') + """
+- image_left / image_right: 2-4 short bullets beside a picture (the picture is a slot the person fills)
+- quote: one short, striking quotation or key sentence from the material (with who said it)"""
 
 
 def _opts(body: dict) -> str:
@@ -806,13 +823,18 @@ def slide_count(minutes) -> int:
     return {5: 6, 10: 10, 20: 16}.get(int(minutes or 10), max(5, min(30, int(minutes or 10))))
 
 
+def _layouts(body: dict) -> tuple[list[str], str]:
+    return (KNOWN, WIZARD_HELP) if body.get("wizard") else (LAYOUTS, LAYOUT_HELP)
+
+
 async def outline(body: dict) -> dict:
-    n = slide_count(body.get("minutes"))
+    n = max(3, min(40, int(body.get("slides") or 0))) if body.get("slides") else slide_count(body.get("minutes"))
+    allowed, help_ = _layouts(body)
     prompt = f"""Plan a presentation of about {n} slides.
 {_opts(body)}
 
 Layouts:
-{LAYOUT_HELP}
+{help_}
 
 MATERIAL:
 {materials_text(body)}
@@ -820,7 +842,7 @@ MATERIAL:
 Start with a title slide; end with references (if any source is cited) and a closing slide.
 Return JSON: {{"title": "...", "subtitle": "...", "slides": [{{"layout": "...", "title": "...", "goal": "what this slide must say, one sentence"}}]}}"""
     j = await complete_json(prompt, SYSTEM, task="slides-outline")
-    slides = [{"layout": s.get("layout") if s.get("layout") in LAYOUTS else "content", "title": str(s.get("title") or "")[:200],
+    slides = [{"layout": s.get("layout") if s.get("layout") in allowed else "content", "title": str(s.get("title") or "")[:200],
                "goal": str(s.get("goal") or "")[:400]} for s in (j.get("slides") or []) if isinstance(s, dict)]
     if not slides:
         raise ValueError("The AI returned no slides. Try again, or add more material.")
@@ -829,7 +851,7 @@ Return JSON: {{"title": "...", "subtitle": "...", "slides": [{{"layout": "...", 
 
 def _clean(s: dict, o: dict) -> dict:
     s = s if isinstance(s, dict) else {}
-    L = o.get("layout") if o.get("layout") in LAYOUTS else s.get("layout") if s.get("layout") in LAYOUTS else "content"
+    L = o.get("layout") if o.get("layout") in KNOWN else s.get("layout") if s.get("layout") in KNOWN else "content"
     as_list = lambda x: [str(b).strip() for b in (x or []) if str(b).strip()] if isinstance(x, list) else []
     col = lambda c: {"heading": str((c or {}).get("heading") or ""), "bullets": as_list((c or {}).get("bullets"))} if isinstance(c, dict) else {"heading": "", "bullets": []}
     tb = s.get("table") if isinstance(s.get("table"), dict) else {}
@@ -837,6 +859,7 @@ def _clean(s: dict, o: dict) -> dict:
            "bullets": as_list(s.get("bullets")), "left": col(s.get("left")), "right": col(s.get("right")),
            "table": {"header": [str(x) for x in tb.get("header") or []], "rows": [[str(c) for c in r] for r in tb.get("rows") or [] if isinstance(r, list)]},
            "chart": s.get("chart") if isinstance(s.get("chart"), dict) else {}, "figure": s.get("figure") if isinstance(s.get("figure"), dict) else {},
+           "quote": {"text": str((s.get("quote") or {}).get("text") or ""), "by": str((s.get("quote") or {}).get("by") or "")} if isinstance(s.get("quote"), dict) else {"text": "", "by": ""},
            "caption": str(s.get("caption") or ""), "notes": str(s.get("notes") or "")}
     if out["chart"].get("chart_id") is not None and not out["chart"].get("sheet_id"):
         out["chart"]["sheet_id"] = o.get("sheet_id", "")
@@ -851,12 +874,13 @@ def finish_content(slides: list[dict], project_id: str = "", notes: bool = True,
         SEP = "\n␞\n"
         fields = []
         for s in slides:
-            fields += [s["title"], s["subtitle"], s["caption"], s["notes"], *s["bullets"], s["left"]["heading"], *s["left"]["bullets"],
-                       s["right"]["heading"], *s["right"]["bullets"], *[c for r in s["table"]["rows"] for c in r]]
+            fields += [s["title"], s["subtitle"], s["caption"], s["notes"], s["quote"]["text"], s["quote"]["by"], *s["bullets"], s["left"]["heading"],
+                       *s["left"]["bullets"], s["right"]["heading"], *s["right"]["bullets"], *[c for r in s["table"]["rows"] for c in r]]
         text, cited, missing = process_citations(SEP.join(fields), db.library_map(project_id), style)
         out = iter(text.split(SEP))
         for s in slides:
             s["title"], s["subtitle"], s["caption"], s["notes"] = next(out), next(out), next(out), next(out)
+            s["quote"]["text"], s["quote"]["by"] = next(out), next(out)
             s["bullets"] = [next(out) for _ in s["bullets"]]
             s["left"]["heading"] = next(out)
             s["left"]["bullets"] = [next(out) for _ in s["left"]["bullets"]]
@@ -892,6 +916,15 @@ async def content(body: dict) -> dict:
     listing = "\n".join(f"{i + 1}. [{o.get('layout')}] {o.get('title')}: {o.get('goal', '')}" for i, o in enumerate(outl))
     notes = body.get("notes", True)
     out = []
+    if body.get("wizard"):
+        chart_rule = 'chart: {"kind": "bar", "label": "what is measured", "labels": [...], "values": [numbers from the material]} (never invent numbers);'
+        figure_rule = ('figure / image_left / image_right: {"url": "<only from the image list, else empty>", "description": "what the picture should show", "caption": "..."}; '
+                       'quote: {"text": "...", "by": "who said it"}; leave "bullets" empty on a quote slide.')
+        quote_key = '"quote": {}, '
+    else:
+        chart_rule = 'chart: {"chart_id": number} from the list;'
+        figure_rule = 'figure: {"url": "...", "caption": "..."} from the image list.'
+        quote_key = ""
     for a in range(0, len(outl), 12):
         b = min(len(outl), a + 12)
         prompt = f"""Write the slides {a + 1}-{b} of this presentation.
@@ -907,12 +940,12 @@ MATERIAL:
 Rules:
 - At most 6 bullets per slide, each under 18 words. No paragraphs on slides.
 - Cite a source right after the claim with [@key], only keys from the library list. Never invent sources or numbers.
-- table: {{"header": [...], "rows": [[...]]}} with values from the material; chart: {{"chart_id": number}} from the list;
-  figure: {{"url": "...", "caption": "..."}} from the image list.
+- table: {{"header": [...], "rows": [[...]]}} with values from the material; {chart_rule}
+  {figure_rule}
 - two_column: "left"/"right" each {{"heading": "...", "bullets": [...]}}.
 - references: leave bullets empty (A.F.R.A writes the list).
 - notes: {"what the speaker says, 60-120 words" if notes else "empty string"}.
-Return JSON: {{"slides": [{{"n": {a + 1}, "layout": "...", "title": "...", "subtitle": "", "bullets": [], "left": {{}}, "right": {{}}, "table": {{}}, "chart": {{}}, "figure": {{}}, "caption": "", "notes": ""}}]}}
+Return JSON: {{"slides": [{{"n": {a + 1}, "layout": "...", "title": "...", "subtitle": "", "bullets": [], "left": {{}}, "right": {{}}, "table": {{}}, "chart": {{}}, "figure": {{}}, {quote_key}"caption": "", "notes": ""}}]}}
 with exactly one entry per outline slide {a + 1}-{b}, in order."""
         j = await complete_json(prompt, SYSTEM, task="slides-content")
         got = j.get("slides") if isinstance(j, dict) else j
@@ -920,6 +953,19 @@ with exactly one entry per outline slide {a + 1}-{b}, in order."""
         for k, o in enumerate(outl[a:b]):
             out.append(_clean(got[k] if k < len(got) else {}, {**o, "sheet_id": sheet_id}))
     return finish_content(out, body.get("project_id", ""), notes)
+
+
+async def rewrite_slide(name: str, cur: dict, ask: str, layout: str = "", wizard: bool = False) -> dict:
+    """The AI rewrites one slide (JSON in, cleaned JSON out). Used by redo() on built decks and by the wizard's mockup."""
+    shapes = ('\nShapes: quote {"text": "...", "by": "..."}; chart {"kind": "bar", "label": "...", "labels": [...], "values": [numbers already on the slide]}; '
+              'figure {"url": "", "description": "what the picture should show", "caption": ""}.') if wizard else ""
+    j = await complete_json(f"""One slide of the deck "{name}" as JSON:
+{json.dumps(cur, ensure_ascii=False)}
+
+{ask}{(' Use the layout "' + layout + '".') if layout and layout != cur.get("layout") else ""}
+Keep citations exactly as written (e.g. (Lee, 2020) or [3]); add no new sources. Same layout and JSON shape.{shapes}
+Return the slide JSON only.""", SYSTEM, task="slides-redo")
+    return _clean(j.get("slide", j) if isinstance(j, dict) else {}, {"layout": layout or cur.get("layout"), "title": cur.get("title")})
 
 
 async def redo(deck_id: str, index: int, action: str, instruction: str = "") -> dict:
@@ -931,14 +977,7 @@ async def redo(deck_id: str, index: int, action: str, instruction: str = "") -> 
            "rewrite": "Rewrite it to be clearer and more engaging. Keep the facts and the citations."}.get(action, instruction or "Improve it.")
     if instruction and action in ("shorter", "rewrite"):
         ask += " " + instruction
-    j = await complete_json(f"""One slide of the deck "{d['name']}" as JSON:
-{json.dumps(cur, ensure_ascii=False)}
-
-{ask}
-Keep citations exactly as written (e.g. (Lee, 2020) or [3]); add no new sources. Same layout and JSON shape.
-Return the slide JSON only.""", SYSTEM, task="slides-redo")
-    new = _clean(j.get("slide", j) if isinstance(j, dict) else {}, {"layout": cur.get("layout"), "title": cur.get("title")})
-    return update_slide(deck_id, index, new)
+    return update_slide(deck_id, index, await rewrite_slide(d["name"], cur, ask))
 
 
 # ---------------------------------------------------------------- building (background job)
