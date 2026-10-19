@@ -96,6 +96,51 @@ def pick(models: dict[str, list[dict]], role: str, profile: str):
     return None
 
 
+# models that read template previews: OpenRouter models taking images, token-efficient families first
+VISION_PREFS = [r"z-ai/glm-[\d.]+-flash$", r"z-ai/glm-[\d.]+v$", r"google/gemini-[\d.]+-flash-lite$", r"google/gemini-[\d.]+-flash$",
+                r"qwen/qwen[\d.]+-flash$", r"deepseek/deepseek-v[\d.]+-flash$", r"openai/gpt-[\d.]+-luna$"]
+VISION_FALLBACK = "z-ai/glm-5.3-flash"
+
+
+async def vision_models(refresh: bool = False) -> dict:
+    """Live list of OpenRouter models that accept images (public endpoint, no key needed), cached 6 h."""
+    ck = "models:openrouter-vision"
+    out = None if refresh else db.cache_get(ck, max_age=6 * 3600)
+    if out is None:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get("https://openrouter.ai/api/v1/models")
+            r.raise_for_status()
+        out = []
+        for m in r.json().get("data", []):
+            p = m.get("pricing") or {}
+            try:
+                pin, pout = round(float(p["prompt"]) * 1e6, 3), round(float(p["completion"]) * 1e6, 3)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if "image" not in ((m.get("architecture") or {}).get("input_modalities") or []) or ":" in m["id"] or pin < 0 \
+                    or re.search(r"preview|image|lyria|audio|router|auto|free", m["id"]):
+                continue
+            out.append({"id": m["id"], "name": m.get("name") or m["id"], "in": pin, "out": pout, "created": m.get("created") or 0})
+        out.sort(key=lambda m: (m["in"] + m["out"], m["id"]))
+        db.cache_set(ck, out)
+    rec = []
+    for pat in VISION_PREFS:
+        hits = [m for m in out if re.search(pat, m["id"]) and m not in rec]
+        if hits:
+            rec.append(max(hits, key=lambda m: _version(m["id"])))
+    return {"models": out, "recommended": rec, "default": rec[0]["id"] if rec else VISION_FALLBACK}
+
+
+def vision_default() -> str:
+    """The recommended preview model from the last live list (no network), else the fallback."""
+    out = db.cache_get("models:openrouter-vision", max_age=30 * 24 * 3600) or []
+    for pat in VISION_PREFS:
+        hits = [m for m in out if re.search(pat, m["id"])]
+        if hits:
+            return max(hits, key=lambda m: _version(m["id"]))["id"]
+    return VISION_FALLBACK
+
+
 async def recommend() -> dict:
     s = get_settings()
     models = {}

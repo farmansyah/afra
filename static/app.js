@@ -2140,7 +2140,7 @@ VIEWS.settings = async () => {
   <div class="card" style="margin-bottom:16px"><h3>Tugas folder</h3><p class="small muted" style="margin-top:0">Where the folders of the <a href="#tugas">Tugas</a> page live on this computer. Leave empty for <code>Documents/A.F.R.A Tugas</code>. Existing folders are not moved: copy them across yourself when you change this.</p><div class="row"><input type="text" id="s_tugas_dir" class="grow" value="${esc(s.tugas_dir || "")}" placeholder="e.g. D:/Kuliah/Tugas"><button class="btn primary" id="savetg">Save</button></div>
     <h3 style="margin-top:16px">Designs folder</h3><p class="small muted" style="margin-top:0">Any .pptx in this folder (subfolders too) shows up as a design on the Slides page and in <b>New deck</b>. Leave empty for the <code>_Designs</code> folder inside the Tugas folder. <span id="dfcount"></span></p>
     <div class="row"><input type="text" id="s_designs_dir" class="grow" value="${esc(s.designs_dir || "")}" placeholder="e.g. D:/Kuliah/Designs"><button class="btn" id="opendf">Open Designs folder</button></div>
-    <label class="f">Model that reads template previews <small>(only when a template has no .pptx to download; needs an OpenRouter key)</small></label><input type="text" id="s_template_vision_model" value="${esc(s.template_vision_model || "")}" placeholder="z-ai/glm-4.5v"></div>
+    <label class="f">Model that reads template previews <small>(only when a template has no .pptx to download; needs an OpenRouter key)</small></label><div class="row"><select id="s_template_vision_model" class="grow" data-cur="${esc(s.template_vision_model || "")}"><option value="${esc(s.template_vision_model || "")}">${esc(s.template_vision_model || "Recommended")}</option></select><button class="btn" id="visref" title="Fetch the latest list from OpenRouter">↻</button></div><div class="small muted" id="vismsg"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Google Slides and Drive</h3><p class="small muted" style="margin-top:0">Decks are made under <a href="#gslides">Slides</a>. Connect one or more Google accounts here or there.</p><div id="googleBox" class="small muted">Checking…</div></div>
@@ -2267,6 +2267,22 @@ VIEWS.settings = async () => {
   const dfCount = () => api("/api/designs/folder").then((f) => { $("#dfcount").textContent = `${f.count} .pptx file${f.count === 1 ? "" : "s"} in ${f.path}`; }).catch(() => { });
   dfCount();
   $("#opendf").onclick = (e) => busy(e.currentTarget, async () => { await doSave(true); await api("/api/designs/folder/open", { method: "POST" }); dfCount(); });
+  // preview-reading models: live from OpenRouter (images in), token-efficient picks first, "" = always the current recommendation
+  const fillVision = async (refresh) => {
+    const sel = $("#s_template_vision_model"); if (!sel) return;
+    const cur = sel.value, v = await api("/api/models/vision" + (refresh ? "?refresh=1" : ""));
+    const price = (m) => `$${m.in} in / $${m.out} out per 1M tokens`;
+    const opt = (m) => `<option value="${esc(m.id)}">${esc(m.name)} (${esc(m.id)}) · ${price(m)}</option>`;
+    const def = v.recommended[0];
+    sel.innerHTML = `<option value="">Recommended, kept up to date${def ? `: ${esc(def.name)} · ${price(def)}` : ""}</option>`
+      + (v.recommended.length ? `<optgroup label="Token-efficient picks">${v.recommended.map(opt).join("")}</optgroup>` : "")
+      + (v.models.length ? `<optgroup label="All models that read images (cheapest first)">${v.models.map(opt).join("")}</optgroup>` : "");
+    if (cur && !v.models.some((m) => m.id === cur)) sel.insertAdjacentHTML("beforeend", `<option value="${esc(cur)}">${esc(cur)} (not in the current list)</option>`);
+    sel.value = cur;
+    $("#vismsg").textContent = v.error ? "Couldn't reach OpenRouter for the latest list: " + v.error : `${v.models.length} models, updated from OpenRouter.`;
+  };
+  fillVision(false).catch(() => { });
+  $("#visref").onclick = (e) => busy(e.currentTarget, () => fillVision(true));
   $("#test").onclick = (e) => busy(e.currentTarget, async () => {
     await doSave(true); $("#tres").textContent = "";
     try {

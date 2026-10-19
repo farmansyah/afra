@@ -275,10 +275,18 @@ class VisionSpecTest(ImportTestCase):
             ti.read_slide(png(), "image/png", 1, 1, conn)
         self.assertIn("401", cm.exception.message)
 
+    def test_recommended_vision_model_is_the_newest_glm_flash(self):
+        live = [{"id": i, "in": 0.1, "out": 0.2} for i in ("z-ai/glm-4.6v", "z-ai/glm-5.3-flash", "z-ai/glm-4.9-flash", "google/gemini-3-flash")]
+        with mock.patch.object(ti.models.db, "cache_get", return_value=live):
+            self.assertEqual(ti.models.vision_default(), "z-ai/glm-5.3-flash")
+        with mock.patch.object(ti.models.db, "cache_get", return_value=None):
+            self.assertEqual(ti.models.vision_default(), ti.models.VISION_FALLBACK)
+
     def test_vision_connection_comes_from_settings(self):
         base = {"llm_provider": "openai", "llm_base_url": "https://openrouter.ai/api/v1", "llm_api_key": "sk-or", "llm2_base_url": "", "llm2_api_key": ""}
-        with mock.patch.object(ti, "get_settings", return_value=base):
-            self.assertEqual(ti.vision_conn(), ("https://openrouter.ai/api/v1", "sk-or", "z-ai/glm-4.5v"))  # the default model
+        with mock.patch.object(ti, "get_settings", return_value=base), \
+                mock.patch.object(ti.models, "vision_default", return_value="z-ai/glm-5.3-flash"):
+            self.assertEqual(ti.vision_conn(), ("https://openrouter.ai/api/v1", "sk-or", "z-ai/glm-5.3-flash"))  # the recommended model
         with mock.patch.object(ti, "get_settings", return_value={**base, "template_vision_model": "z-ai/glm-5v"}):
             self.assertEqual(ti.vision_conn()[2], "z-ai/glm-5v")
         with mock.patch.object(ti, "get_settings", return_value={**base, "llm_api_key": ""}), self.assertRaises(ti.Stop) as cm:
