@@ -3,10 +3,12 @@
 Path 1, direct download: read the template page like a browser, find the site's own free .pptx download and keep an
 exact copy (Slidesgo, SlidesCarnival, Microsoft templates, a public Google Slides deck, or a plain .pptx link). A link
 only counts when it really serves a .pptx (zip magic "PK" and a PowerPoint inside). A page that marks the template as
-premium or paid stops the import, and so does a download that sends the browser to a sign-in page: A.F.R.A never logs
-in and never gets around a paywall. A sidecar "<file>.source.json" records the link and the credit the free licence asks for.
+premium or paid stops the import, and a download that sends the browser to a sign-in page is never followed: A.F.R.A
+never logs in and never gets around a paywall. A sidecar "<file>.source.json" records the link and the credit the free licence asks for.
 
-Path 2, rebuild from the preview (only when the page presents the template as free and offers no .pptx): a headless
+Path 2, rebuild from the preview: how a free template with no freely downloadable .pptx is handled — the page offers
+no download at all, or the download is the site's own sign-in gate (that gate is never opened). Only the pictures the
+page shows publicly are used: a headless
 Edge or Chrome opens the page on a loopback debugging port, REA (rea-agents, installed with npm) lists the page and
 inspects it for the preview pictures, a GLM vision model (setting template_vision_model, through OpenRouter) turns each
 preview into a layout spec, and pptx_build writes an editable .pptx with real text boxes. If REA, a browser or the model
@@ -112,9 +114,16 @@ def visible_text(html: str) -> str:
 
 
 def candidates(html: str, base: str) -> list[str]:
-    """Links on the page that may serve the template's .pptx, best guesses first."""
-    raw = re.findall(r"""(?:href|data-href|data-url|data-download|data-file)=["']([^"']+)""", html[:3_000_000], re.I)
-    raw += [m.replace("\\/", "/") for m in re.findall(r"https?:\\?/\\?/[^\"'\s<>\\]+?\.pptx\b[^\"'\s<>\\]*", html[:3_000_000])]
+    r"""Links on the page that may serve the template's .pptx, best guesses first.
+
+    Besides the ordinary link attributes this reads the site's own page data (the JSON in its scripts): a page that
+    names its free file there, Slidesgo only naming the download address — gets its direct .pptx link too, whether it
+    sits in escaped form ("https:\/\/cdn…\/x.pptx") or in capital letters (.PPTX).
+    """
+    text = html[:3_000_000].replace("\\u002f", "/").replace("\\u002F", "/").replace("\\/", "/")
+    raw = re.findall(r"""(?:href|data-href|data-url|data-download|data-file)=["']([^"']+)""", text, re.I)
+    raw += re.findall(r'"(?:(?:download[\w-]*|file)[\w-]*|pptx)"\s*:\s*"([^"]+\.pptx\b[^"]*)"', text, re.I)
+    raw += re.findall(r"https?://[^\"'\s<>\\]+?\.pptx\b[^\"'\s<>]*", text, re.I)
     exact, routes, downloads, seen = [], [], [], set()
     for r in raw:
         u = urljoin(base, unescape(r).strip())
@@ -301,7 +310,16 @@ def import_link(url: str, step=lambda s: None) -> dict:
                 if got:
                     return {"url": url, **save_design(got[0], info["title"] or got[1], url, info["kind"], info)}
             if blocked:
-                raise Stop("signin", NEED_SIGNIN.format(site=SITE_NAME.get(info["kind"], "That site")))
+                if not info["free"]:
+                    raise Stop("signin", NEED_SIGNIN.format(site=SITE_NAME.get(info["kind"], "That site")))
+                try:  # the page itself says free: its download is what sits behind the gate, so rebuild from what the page shows publicly
+                    res = rebuild_from_preview(str(r.url), info, step)
+                except Stop as s:
+                    if s.status == "missing":
+                        raise Stop("missing", s.message + " Or download the .pptx in your browser and drop it into the "
+                                   "Designs folder: it shows up there by itself.")
+                    raise
+                return {"url": url, **res}
             if info["listing"]:
                 raise Stop("no_file", "That page lists many templates. Paste the link of one template.")
             if not info["free"]:
@@ -430,6 +448,12 @@ class Browser:
             time.sleep(0.5)
 
 
+def _natural_key(url: str) -> list[tuple[int, str]]:
+    """"slide-2" before "slide-10": a file name read as alternating text and number pieces."""
+    name = unquote(urlparse(url).path).rsplit("/", 1)[-1]
+    return [(int(t), "") if t.isdigit() else (-1, t) for t in re.split(r"(\d+)", name)]
+
+
 def capture_previews(cmd: list[str], exe: str, url: str, hint_images: list[str], step=lambda s: None, limit: int = 12) -> list[tuple[bytes, str]]:
     """The preview slide pictures of a page: images the browser loaded (found by REA), else one screenshot."""
     origins = list(dict.fromkeys(f"{urlparse(u).scheme}://{urlparse(u).netloc}" for u in [url, *hint_images] if public_host(u)))[:6]
@@ -462,7 +486,7 @@ def capture_previews(cmd: list[str], exe: str, url: str, hint_images: list[str],
     out, seen = [], set()
     step("Collecting the preview pictures…")
     with _client() as h:
-        for u in dict.fromkeys(urls + hint_images):
+        for u in sorted(dict.fromkeys(urls + hint_images), key=_natural_key):  # previews land in slide order
             if len(out) >= limit or not public_host(u):
                 continue
             try:
