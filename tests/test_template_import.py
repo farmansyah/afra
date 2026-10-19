@@ -123,16 +123,16 @@ class DirectDownloadTest(ImportTestCase):
         self.assertEqual(again["status"], "saved")
         self.assertEqual(len(list(self.designs_dir.glob("*.pptx"))), 2)
 
-    def test_slidesgo_sign_in_stops_the_import(self):
+    def test_slidesgo_free_never_goes_to_the_sign_in_download(self):
         url = "https://slidesgo.com/theme/abstract-art"
         self.site({url: httpx.Response(200, text=page("slidesgo_free.html"), headers=HTML),
                    url + "/download": httpx.Response(302, headers={"location": "https://slidesgo.com/auth/login"}),
                    "https://slidesgo.com/auth/login": httpx.Response(200, text="<form>Sign in</form>", headers=HTML)})
-        r = ti.import_link(url)
-        self.assertEqual(r["status"], "signin")
-        self.assertIn("never signs in", r["message"])
+        with mock.patch("app.slidesgo.rea_image_urls", return_value=[]):
+            r = ti.import_link(url)
+        self.assertEqual(r["status"], "no_file")  # free, but this page lists no preview pictures to rebuild from
         self.assertEqual(self.files(), [])
-        self.assertTrue(all(m == "GET" for m, _ in self.seen))  # looked, never logged in or posted anything
+        self.assertEqual(self.seen, [("GET", url)])  # looked at the page only: no download, no login
 
     def test_premium_template_is_not_imported_and_not_downloaded(self):
         url = "https://slidesgo.com/theme/brazilian-halloween"

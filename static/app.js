@@ -1748,7 +1748,7 @@ function gsCard(d, pick) {
   const t = d.theme || {};
   return `<div class="dcard${pick && GS.design === d.id ? " sel" : ""}" data-did="${esc(d.id)}">
     <img src="/api/designs/${encodeURIComponent(d.id)}/thumb?v=${Math.round(d.added || 0)}" alt="" loading="lazy">
-    <div class="dmeta"><div class="t">${esc(d.name)} ${d.default ? `<span class="pill ok">default</span>` : ""}</div>
+    <div class="dmeta"><div class="t">${esc(d.name)} ${d.default ? `<span class="pill ok">default</span>` : ""}${d.rebuilt ? `<span class="pill warn" title="${esc(d.credit || "Rebuilt, not the original file")}">Rebuilt</span>` : ""}</div>
       <div class="sw">${gsSwatch(t)}</div>
       <div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)} · ${esc(t.heading_font || "")}${t.body_font && t.body_font !== t.heading_font ? " / " + esc(t.body_font) : ""}</div>
       ${pick ? "" : `<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px">
@@ -1969,23 +1969,39 @@ const IMP_OK = new Set(["saved", "rebuilt", "added"]);
 const impShort = (u) => u.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60);
 function impRows(j) {
   return j.items.map((i) => {
-    const tag = i.state === "done" ? (IMP_OK.has(i.status) ? `<span class="pill ok">${i.status === "rebuilt" ? "Rebuilt" : "Added"}</span>` : `<span class="pill warn">Not imported</span>`)
+    const tag = i.state === "done" ? (IMP_OK.has(i.status) ? `<span class="pill ok">${i.status === "rebuilt" ? "Rebuilt" : "Added"}</span>` : i.status === "premium" ? `<span class="pill warn">Paid members only</span>` : `<span class="pill warn">Not imported</span>`)
+      : i.state === "claude" ? `<span class="pill warn">Waiting for Claude</span>`
       : i.state === "working" ? `<span class="spin"></span>` : `<span class="pill gray">Waiting</span>`;
-    return `<div class="tg-info small" style="margin:4px 0;padding:6px 10px">${tag} <b>${esc(i.name || impShort(i.url))}</b> <span class="muted">${esc(i.step || i.message || "")}</span></div>`;
+    const claude = i.state === "claude" ? `<div class="small" style="margin-top:4px">The job went to the Claude app. Open Claude and press <b>Enter</b>; the design appears here by itself. <span class="row" style="display:inline-flex;gap:6px;margin-left:6px"><a class="btn small primary" href="${esc(claudeLink(i.claude_msg || ""))}" data-icopy="${esc(i.claude_msg || "")}">Open Claude</a><button class="btn small ghost" data-icancel="${esc(i.task || "")}">Cancel</button></span></div>` : "";
+    return `<div class="tg-info small" style="margin:4px 0;padding:6px 10px">${tag} <b>${esc(i.name || impShort(i.url))}</b> <span class="muted">${esc(i.step || i.message || "")}</span>${i.state === "claude" && i.message ? `<div class="muted">${esc(i.message)}</div>` : ""}${claude}</div>`;
   }).join("");
 }
-async function designImport(text, out) {  // links (one per line) -> the Designs folder; shows one line per link while it works
-  const { job } = await api("/api/designs/import", { body: { links: text } });
-  for (; ;) {
-    const j = await api("/api/designs/import/" + job);
-    out.innerHTML = impRows(j);
-    if (j.state === "done") return j;
-    await sleep(1200);
-  }
+// links (one per line) -> the Designs folder; shows one line per link while it works. Resolves when every link is done or only
+// waits for Claude (the Claude app hands the design back later); `after(job)` runs when the last one is done.
+function designImport(text, out, after) {
+  return new Promise(async (resolve, reject) => {
+    let settled = false, opened = false;
+    const settle = (j) => { if (!settled) { settled = true; resolve(j); return true; } return false; };
+    try {
+      const { job } = await api("/api/designs/import", { body: { links: text } });
+      for (; ;) {
+        const j = await api("/api/designs/import/" + job);
+        if (!out.isConnected) return settle(j);
+        out.innerHTML = impRows(j);
+        $$("[data-icopy]", out).forEach((a) => a.onclick = () => copyText(a.dataset.icopy));
+        $$("[data-icancel]", out).forEach((b) => b.onclick = () => fetch(`/api/handoff/${b.dataset.icancel}/cancel`, { method: "POST" }));
+        const waiting = j.items.filter((i) => i.state === "claude");
+        if (waiting.length && !opened) { opened = true; copyText(waiting[0].claude_msg); try { openClaude(claudeLink(waiting[0].claude_msg)); } catch { /* the button does it */ } }
+        if (j.state === "done") { if (!settle(j) && after) await after(j); return; }
+        if (j.items.every((i) => i.state === "done" || i.state === "claude")) settle(j);
+        await sleep(waiting.length ? 3000 : 1200);
+      }
+    } catch (e) { if (!settled) { settled = true; reject(e); } }
+  });
 }
 function pdCard(d, sel) {
   return `<div class="dcard${sel ? " sel" : ""}" data-did="${esc(d.id)}" title="${esc(d.name)}"><img src="/api/designs/${encodeURIComponent(d.id)}/thumb?v=${Math.round(d.added || 0)}" alt="" loading="lazy">
-    <div class="dmeta"><div class="t">${esc(d.name)}</div><div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)}</div></div></div>`;
+    <div class="dmeta"><div class="t">${esc(d.name)}${d.rebuilt ? ` <span class="pill warn" title="${esc(d.credit || "Rebuilt, not the original file")}">Rebuilt</span>` : ""}</div><div class="small muted">${esc(d.in_folder ? "Designs folder" : GKIND[d.kind] || d.kind)}</div></div></div>`;
 }
 // pickDesign({selected, title, button}) -> Promise of the chosen design (the /api/designs record), or null when cancelled
 function pickDesign(opts = {}) {
@@ -2014,7 +2030,8 @@ function pickDesign(opts = {}) {
     $("#pdok", box).onclick = () => finish(list.find((d) => d.id === chosen) || null);
     $("#pdadd", box).onclick = (e) => busy(e.currentTarget, async () => {
       if (!$("#pdlinks", box).value.trim()) return toast("Paste at least one link");
-      await designImport($("#pdlinks", box).value, $("#pdres", box));
+      const j = await designImport($("#pdlinks", box).value, $("#pdres", box), async () => { if (box.isConnected) await load(); });
+      if (j.items.some((i) => i.state === "claude")) toast("Sent to Claude: the design appears here when Claude hands it back", "ok");
       await load();
     });
   });
@@ -2026,7 +2043,7 @@ async function gsDesigns(el) {
       <div class="small muted" style="margin-top:4px">Drop any .pptx files in <code>${esc(fold.path)}</code>: each one becomes a design here, with its picture, by itself. <b>${fold.count}</b> file${fold.count === 1 ? "" : "s"} in it now. Change the folder under Settings.</div></div>
       <button class="btn" id="dopenf">Open Designs folder</button></div></div>
     <div class="grid g3" style="gap:12px;margin-bottom:12px">
-    <div class="card" style="margin:0"><h3>Add from links</h3><p class="small muted" style="margin-top:0">One or several links, one per line, to <b>free</b> templates: Slidesgo, SlidesCarnival, Microsoft templates, a public Google Slides deck or any template page. A.F.R.A saves the template's own free .pptx into the Designs folder, with its credit. It never signs in and skips paid templates.</p>
+    <div class="card" style="margin:0"><h3>Add from links</h3><p class="small muted" style="margin-top:0">One or several links, one per line, to <b>free</b> templates: Slidesgo, SlidesCarnival, Microsoft templates, a public Google Slides deck or any template page. A.F.R.A saves the template's own free .pptx into the Designs folder, with its credit. Free Slidesgo templates (their .pptx needs a sign-in) are <b>rebuilt</b> from their public previews, by a GLM vision model or, in Claude mode, by Claude with PPT Master, and get a <b>Rebuilt</b> badge. It never signs in and skips paid templates.</p>
       <textarea id="dlinks" rows="4" placeholder="https://slidesgo.com/theme/…&#10;https://docs.google.com/presentation/d/…"></textarea>
       <div class="row" style="margin-top:8px"><button class="btn primary small" id="dadd">Add designs</button></div><div id="dres" class="small" style="margin-top:6px"></div></div>
     <div class="card" style="margin:0"><h3>Add a PowerPoint</h3><p class="small muted" style="margin-top:0">A .pptx template or any deck you like; it is also saved in the Designs folder. A.F.R.A takes its colours and fonts; in Google Slides it also keeps its real layouts.</p>
@@ -2042,7 +2059,13 @@ async function gsDesigns(el) {
     const txt = $("#dlinks").value;
     if (/docs\.google\.com\/presentation/.test(txt) && !live.length) toast("Google Slides links need a connected Google account; the other links are added now");
     if (!txt.trim()) return toast("Paste at least one link");
-    const j = await designImport(txt, $("#dres"));
+    const out = $("#dres");
+    const j = await designImport(txt, out, async (fin) => {  // the last Claude rebuild arrived
+      if (!out.isConnected) return;
+      await again(); $("#dres").innerHTML = impRows(fin);
+      toast("A design Claude rebuilt is in the list", "ok");
+    });
+    if (j.items.some((i) => i.state === "claude")) return toast("Sent to Claude: open Claude and press Enter. The design appears when Claude hands it back", "ok");
     const n = j.items.filter((i) => IMP_OK.has(i.status) || i.name).length;
     await again();
     $("#dres").innerHTML = impRows(j);

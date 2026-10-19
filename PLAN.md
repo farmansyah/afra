@@ -165,3 +165,11 @@ Every deck goes through one wizard. Google Drive, Docs, Slides and Sheets are co
 - **Review first:** the AI proposes the sections and items; the person can tick items off, move them or edit them before the file is made.
 - **Formats:** Word (.docx, real columns), PDF, and Google Doc. Saved into a Tugas folder.
 - **Where it starts:** select several files in a Tugas folder and choose **Make cheatsheet**; a **Cheatsheet** page in the sidebar; and from the Create into PPT sources.
+
+### Free Slidesgo templates, rebuilt from their previews (2026-10-19)
+- Slidesgo's real .pptx needs a sign-in, so A.F.R.A no longer tries it. A theme page marked **Free** is rebuilt from its public slide previews (media.slidesgo.com, the largest variant of each slide); **Premium** stops with "This template is for paid members only". Never a login, never a third-party downloader.
+- Previews: REA (headless browser) adds the picture addresses it sees; the page's own HTML lists every slide as well, so a missing REA or browser only gets a note. They are downloaded (size and time caps) into `data/slidesgo_previews`, and removed afterwards.
+- Engine by AI mode: **API** = GLM vision per preview, then `pptx_build`; **Claude app** = a task (`handoff.create`, kind "design") telling Claude to rebuild it with PPT Master; Claude hands the file back with the MCP tool `save_design(task_id, pptx_path)` (checked as a real .pptx, saved in the Designs folder with its sidecar, task finished). No OpenRouter key is needed in Claude mode.
+- The sidecar credit reads "Rebuilt from Slidesgo (free template) — not the original file. Template by Slidesgo / Freepik: keep the credits slide."; the design list shows a **Rebuilt** badge. "Add from links" shows a status per link, including "Waiting for Claude" with an Open Claude button.
+- Code: `app/slidesgo.py`, hooks in `template_import.py`, `handoff.create`, `/api/designs/rebuilt/{task}`, `save_design` in `mcp_server.py`. Tests: `tests/test_slidesgo.py`.
+- **Not verified:** a real GLM key run, a real Claude + PPT Master rebuild, the browser UI by eye.

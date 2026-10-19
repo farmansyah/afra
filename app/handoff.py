@@ -11,6 +11,8 @@ features with a no-AI fallback (keyword search, metadata from Crossref...) use t
 """
 import asyncio
 import contextvars
+import hashlib
+import threading
 import time
 
 from . import db
@@ -52,6 +54,15 @@ async def ask(system: str, messages: list[dict], task: str) -> str:
     except Exception:
         pass
     return t["result"]
+
+
+def create(task: str, system: str, prompt: str, kind: str = "", prefix: str = "t", **extra) -> str:
+    """A task that nobody awaits: the page shows it and Claude finishes it through its own tool (kind "design": save_design).
+    Returns the task id. The caller reads TASKS[id]["status"] (waiting, claimed, done, cancelled) later."""
+    tid = _new_id(prefix + hashlib.sha1(f"{time.time()}{task}".encode()).hexdigest()[:8])
+    TASKS[tid] = {"id": tid, "task": task, "system": system, "prompt": prompt, "json": False, "kind": kind, "status": "waiting",
+                  "created": time.time(), "result": None, "done": threading.Event(), **extra}
+    return tid
 
 
 def _visible(t: dict) -> dict:

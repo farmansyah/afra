@@ -28,7 +28,8 @@ INSTRUCTIONS = """A.F.R.A is the user's own research library and manuscript tool
   APA, IEEE, Harvard, Chicago, Vancouver or MLA citations plus the reference list when exporting to Word.
 - Documents are Markdown (# headings, **bold**, tables). save_document stores them; export_word makes the .docx.
 - Prefer high-quality sources (Q1/Q2, recent, cited) and say when evidence is thin.
-- A message like "A.F.R.A task <id>" means the user pressed a button in A.F.R.A: call get_task, do it, finish_task.
+- A message like "A.F.R.A task <id>" means the user pressed a button in A.F.R.A: call get_task, do it, finish_task
+  (a Slidesgo rebuild task ends with save_design instead).
 - Decks: write the slides yourself and call google_slides_create (Google Slides when an account is connected, and/or an
   editable .pptx). Pick a design with google_slides_templates; get a document's text with slide_material."""
 
@@ -284,9 +285,11 @@ def t_get_task(a):
     t = api("GET", f"/api/handoff/{a['task_id']}").json()
     fmt = ("Your answer must be valid JSON in exactly the format described above (no commentary)." if t["json"]
            else "Answer with the requested text only (no preface, no closing remarks): it is inserted into A.F.R.A as is.")
+    how = f"then call finish_task with task_id \"{t['id']}\" and your answer. {fmt}"
+    if t.get("kind") == "design":  # a Slidesgo rebuild: the answer is a .pptx file, handed back with save_design
+        how = f"then, when the .pptx is finished, call save_design with task_id \"{t['id']}\" and pptx_path (do not call finish_task)."
     return (f"A.F.R.A task {t['id']} ({t['task']}). The user clicked a button in A.F.R.A and is waiting there.\n"
-            f"Do exactly what the instructions say, then call finish_task with task_id \"{t['id']}\" and your answer. "
-            f"{fmt} Don't call other tools unless the instructions need them. In the chat, just say it's done.\n\n"
+            f"Do exactly what the instructions say, {how} Don't call other tools unless the instructions need them. In the chat, just say it's done.\n\n"
             f"<instructions role=\"system\">\n{t['system']}\n</instructions>\n\n<instructions role=\"user\">\n{t['prompt']}\n</instructions>")
 
 
@@ -295,6 +298,22 @@ def t_finish_task(a):
     if r.get("next"):
         return f"Done: A.F.R.A received it. One more step of the same button is waiting: call get_task with task_id \"{r['next']}\"."
     return "Done: the result is now in A.F.R.A, where the user clicked. Tell the user in one short sentence."
+
+
+def t_save_design(a):
+    p = Path(str(a.get("pptx_path") or "").strip().strip('"')).expanduser()
+    if not p.is_file():
+        raise RuntimeError(f"There is no file at {p}. Save the finished deck as a .pptx on this computer and pass its full path.")
+    if p.suffix.lower() != ".pptx":
+        raise RuntimeError("Only a .pptx file can be handed back. Save the deck as .pptx and try again.")
+    if p.stat().st_size > 120_000_000:
+        raise RuntimeError("That file is over 120 MB.")
+    data = p.read_bytes()
+    if data[:4] != b"PK" + bytes([3, 4]):
+        raise RuntimeError("That isn't a real .pptx (it is not a zip file). Save the deck as .pptx and try again.")
+    r = api("POST", f"/api/designs/rebuilt/{a['task_id']}", files={"file": (p.name, data)}).json()
+    return (f"Saved: \"{r['name']}\" ({r['slides']} slides) is now in the user's A.F.R.A Designs folder with the Slidesgo credit and a "
+            f"\"Rebuilt\" badge. The task is finished. Tell the user in one short sentence, and remind them to keep the credits slide.")
 
 
 def t_pending(_):
@@ -440,6 +459,9 @@ TOOLS = {
     "finish_task": (t_finish_task, "Send the answer of an A.F.R.A task back; it appears in A.F.R.A where the user clicked.",
                     {"task_id": S, "result": {**S, "description": "the answer only (text, or JSON if the task asks for JSON)"}},
                     ["task_id", "result"]),
+    "save_design": (t_save_design, "Hand back the .pptx you rebuilt for an A.F.R.A Slidesgo task (the task text says when). A.F.R.A checks it "
+                    "is a real PowerPoint, saves it in the Designs folder with its credit and finishes the task.",
+                    {"task_id": S, "pptx_path": {**S, "description": "full path of the finished .pptx on this computer"}}, ["task_id", "pptx_path"]),
     "pending_tasks": (t_pending, "List A.F.R.A tasks waiting for Claude (when the user says 'do my A.F.R.A tasks').", {}, []),
     "check_references": (t_check_refs, "Check cited papers: missing from the library, retracted, broken DOIs.",
                          {"markdown": {**S, "description": "text whose citations to check; leave out to check the whole library"},

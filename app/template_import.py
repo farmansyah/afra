@@ -283,6 +283,9 @@ def import_link(url: str, step=lambda s: None) -> dict:
             info = page_info(r.text, str(r.url))
             if info["premium"]:
                 raise Stop("premium", "This template is for paid members only, so A.F.R.A can't import it.")
+            if info["kind"] == "slidesgo":  # Slidesgo's download needs a sign-in: free templates are rebuilt from the public previews instead
+                from . import slidesgo
+                return {"url": url, **slidesgo.rebuild(str(r.url), r.text, info, step)}
             blocked = False
             for link in info["links"][:4]:
                 step("Downloading the template…")
@@ -614,13 +617,25 @@ def rebuild_from_preview(url: str, info: dict, step=lambda s: None) -> dict:
     shots = capture_previews(cmd, exe, url, info.get("images") or [], step)
     if not shots:
         raise Stop("no_file", "A.F.R.A couldn't find preview slides on that page.")
-    specs = []
-    for i, (img, mime) in enumerate(shots, 1):
+    return rebuild_from_images(shots, url, info, conn, step)
+
+
+def rebuild_from_images(shots: list[tuple[bytes, str]], url: str, info: dict, conn: tuple[str, str, str], step=lambda s: None,
+                        note: str = "", extra: dict | None = None, workers: int = 1) -> dict:
+    """Preview pictures -> a GLM layout spec per slide -> an editable .pptx in the Designs folder."""
+    def one(a):
+        i, (img, mime) = a
         step(f"Reading slide {i} of {len(shots)} with {conn[2]}…")
         try:
-            specs.append(read_slide(img, mime, i, len(shots), conn))
+            return read_slide(img, mime, i, len(shots), conn)
         except ValueError:
-            continue
+            return None
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(workers) as ex:
+            specs = [x for x in ex.map(one, enumerate(shots, 1)) if x]
+    else:
+        specs = [x for x in map(one, enumerate(shots, 1)) if x]
     if not specs:
         raise Stop("error", "The vision model didn't return a usable layout for any preview.")
     sz = pptx_build.image_size(shots[0][0])
@@ -628,8 +643,9 @@ def rebuild_from_preview(url: str, info: dict, step=lambda s: None) -> dict:
     deck = build_deck_spec(specs, info["title"] or "Template", sz)
     thumb = (shots[0][0], "png" if shots[0][1] == "image/png" else "jpeg") if shots[0][1] in ("image/png", "image/jpeg") else None
     data = pptx_build.build_from_spec(deck, info["title"], thumb)
-    note = "Rebuilt by A.F.R.A from the preview pictures (similar layouts, colours and fonts; not an exact copy)."
-    return save_design(data, (info["title"] or "Template") + " (rebuilt)", url, info["kind"], info, "rebuilt", {"note": note, "slides": len(specs)})
+    note = note or "Rebuilt by A.F.R.A from the preview pictures (similar layouts, colours and fonts; not an exact copy)."
+    return save_design(data, (info["title"] or "Template") + " (rebuilt)", url, info["kind"], info, "rebuilt",
+                       {"note": note, "slides": len(specs), **(extra or {})})
 
 
 # ---------------------------------------------------------------- several links in the background
@@ -674,14 +690,24 @@ def start(links) -> dict:
                 res = run_link(it["url"], lambda s, it=it: it.update(step=s))
             except Exception as e:  # one bad link must not stop the others
                 res = {"status": "error", "message": f"Something went wrong ({e.__class__.__name__})."}
+            if res.get("status") == "claude":  # handed to the Claude app: done when Claude calls save_design (see job())
+                it.update(state="claude", step="Waiting for Claude", status="", message=res.get("message", ""), name=res.get("name", ""),
+                          task=res["task"], claude_msg=res["claude_msg"])
+                continue
             it.update(state="done", step="", status=res.get("status", ""), message=res.get("message", ""), name=res.get("name", ""))
-        J["state"] = "done"
+        J["dispatched"] = True
     threading.Thread(target=run, daemon=True).start()
     return {"job": jid}
 
 
 def job(jid: str) -> dict:
+    """The job with its items brought up to date: an item handed to Claude finishes when Claude saves the design."""
     j = JOBS.get(jid)
     if not j:
         raise ValueError("Unknown job (A.F.R.A was restarted?). Check the Designs folder.")
+    from . import slidesgo
+    for it in j["items"]:
+        if it["state"] == "claude":
+            slidesgo.claude_item_state(it)
+    j["state"] = "done" if j.get("dispatched") and all(it["state"] == "done" for it in j["items"]) else "working"
     return j
