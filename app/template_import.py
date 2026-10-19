@@ -39,7 +39,7 @@ TRANSPORT = None  # tests put an httpx.MockTransport here
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 MAX_PPTX = 120_000_000
 JOBS: dict[str, dict] = {}
-DEFAULT_VISION_MODEL = "z-ai/glm-4.5v"
+DEFAULT_VISION_MODEL = models.VISION_FALLBACK
 LOGIN_RE = re.compile(r"(accounts\.google\.com|login\.microsoftonline\.com|login\.live\.com|id\.magnific\.com|id\.freepik\.com)|"
                       r"/(log-?in|sign-?in|signin|signup|sign-up|register|auth|sso)(/|$)", re.I)
 CREDIT = {
@@ -554,10 +554,10 @@ def build_deck_spec(slides: list[dict], name: str, aspect: tuple[int, int] | Non
 def vision_conn() -> tuple[str, str, str]:
     """(base_url, api_key, model) of the connection that reads previews; a message in Stop when there is none."""
     s = get_settings()
-    model = (s.get("template_vision_model") or "").strip() or DEFAULT_VISION_MODEL
+    model = (s.get("template_vision_model") or "").strip() or models.vision_default()
     conns = [models._conn(src, s) for src in ("1", "2")]
     usable = [(b, k) for p, b, k in conns if p != "anthropic" and b and k]
-    pick = next((c for c in usable if "openrouter.ai" in c[0]), None) or (usable[0] if usable and model != DEFAULT_VISION_MODEL else None)
+    pick = next((c for c in usable if "openrouter.ai" in c[0]), None) or (usable[0] if usable and not model.startswith("z-ai/") else None)
     if not pick:
         raise Stop("missing", "Rebuilding from a preview needs an OpenRouter key (Settings › AI model) to read the pictures with a GLM vision model.")
     return pick[0], pick[1], model

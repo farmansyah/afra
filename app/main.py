@@ -370,6 +370,14 @@ async def recommend_models():
     return await models.recommend()
 
 
+@app.get("/api/models/vision")
+async def vision_models(refresh: bool = False):
+    try:
+        return await models.vision_models(refresh)
+    except Exception as e:
+        return {"models": [], "recommended": [], "default": models.vision_default(), "error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+
 # ---------------------------------------------------------------- projects
 @app.get("/api/projects")
 def projects():
