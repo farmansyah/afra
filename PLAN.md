@@ -151,3 +151,17 @@ Every deck goes through one wizard. Google Drive, Docs, Slides and Sheets are co
 - **Output:** .pptx into a Tugas folder (folder picker), Google Slides (the .pptx converted), or both. Without a Google account the Google parts say "Connect a Google account first: Settings › Google." and the .pptx still works.
 - **Tests:** 121 pass (`tests/test_wizard.py` adds 38). Smoke-tested in the browser on port 8777: blank path, inline edits, ops, resume, review, create, essay approval gate, and the Claude-app hand-off for analyse, outline and slides.
 - **Not verified:** real AI output, Deep Research end to end with a key, any Google call, the vision step with a real key, opening the files in real PowerPoint.
+
+### Several sources at once, and cheatsheets (asked 2026-10-19)
+#### Several documents as the source
+- Everywhere a deck or essay starts from "a document or reading" (the Slides page card, the Create into PPT wizard's Content step, Tugas New deck), people can pick **several**: A.F.R.A documents, library papers, uploaded files and files in a Tugas folder, mixed.
+- The AI reads them together. Each slide keeps track of which source it came from, so citations and the references slide list every source used, and the mockup shows a slide's source.
+- Long sets are summarised per source first, then merged, so nothing is cut off by the model's context.
+
+#### Cheatsheets
+- **From many lectures, documents and materials at once:** lecture slides (.pptx and PDF), Word, PDF, notes, A.F.R.A documents and papers, and whole Tugas folders.
+- **Output:** a dense, printable cheatsheet: definitions, formulas, key concepts, steps, comparisons and short examples, grouped by topic, with a small source tag on each item.
+- **Options:** length (1 page, 2 pages, or both sides of A4), columns (2 or 3), font size, what to include (definitions, formulas, examples, dates and names), and language.
+- **Review first:** the AI proposes the sections and items; the person can tick items off, move them or edit them before the file is made.
+- **Formats:** Word (.docx, real columns), PDF, and Google Doc. Saved into a Tugas folder.
+- **Where it starts:** select several files in a Tugas folder and choose **Make cheatsheet**; a **Cheatsheet** page in the sidebar; and from the Create into PPT sources.
