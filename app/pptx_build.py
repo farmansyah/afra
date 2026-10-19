@@ -402,6 +402,8 @@ def render_spec(s: dict, t: dict, number: int, images: dict) -> tuple[Slide, lis
     Positions in the spec are percentages of the slide, so any slide size works."""
     sw, sh = s["_size"]
     sl = Slide(s.get("background") or t["light"])
+    if s.get("_image"):  # a slide the model couldn't read: its preview as one picture, in its place
+        sl.picture(0, 0, sw, sh, *s["_image"])
     for sh_ in s.get("shapes") or []:
         w, h = sh_["w"] * sw / 100, sh_["h"] * sh / 100
         if sh_["type"] == "line":

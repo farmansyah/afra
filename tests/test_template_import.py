@@ -244,6 +244,27 @@ class VisionSpecTest(ImportTestCase):
             with self.assertRaises(ValueError):
                 ti.validate_spec(bad)
 
+    def test_a_slide_the_model_cannot_read_stays_in_place_as_its_picture(self):
+        v = ti.validate_spec(self.SPEC)
+        answers = {1: v, 2: ValueError("cut off"), 3: ti.Stop("busy", "busy")}
+        def fake(img, mime, n, total, conn):
+            a = answers[n]
+            if isinstance(a, Exception):
+                raise a
+            return a
+        saved = {}
+        with mock.patch.object(ti, "read_slide", side_effect=fake), \
+                mock.patch.object(ti, "save_design", side_effect=lambda data, name, *a: saved.update(data=data, extra=a[-1]) or {"status": "rebuilt"}):
+            ti.rebuild_from_images([(png(), "image/png")] * 3, "https://x.test/t", {"title": "T", "kind": "web"}, ("b", "k", "m"), workers=2)
+        z = zipfile.ZipFile(__import__("io").BytesIO(saved["data"]))
+        self.assertEqual(len([n for n in z.namelist() if n.startswith("ppt/slides/slide") and n.endswith(".xml")]), 3)  # none dropped
+        self.assertIn("<a:t>Thesis defense</a:t>", z.read("ppt/slides/slide1.xml").decode("utf-8"))  # order kept
+        for n in (2, 3):
+            self.assertIn("<p:pic>", z.read(f"ppt/slides/slide{n}.xml").decode("utf-8"))
+        self.assertEqual(saved["extra"]["pictures"], 2)
+        with mock.patch.object(ti, "read_slide", side_effect=ti.Stop("error", "401")), self.assertRaises(ti.Stop):
+            ti.rebuild_from_images([(png(), "image/png")], "https://x.test/t", {"title": "T", "kind": "web"}, ("b", "k", "m"))  # a real error still stops
+
     def test_renders_an_editable_pptx_with_real_text_boxes(self):
         v = ti.validate_spec(self.SPEC)
         d = ti.build_deck_spec([v, v], "Thesis", (4, 3))
