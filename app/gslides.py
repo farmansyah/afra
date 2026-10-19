@@ -773,6 +773,8 @@ def materials_text(body: dict) -> str:
         m = MATERIALS.get(mid)
         if m:
             parts.append(f"### File: {m['name']}\n{m['text'][:14000]}")
+    if (body.get("sources_text") or "").strip():  # several sources read together (sources.digest): tagged blocks [S1], [S2]...
+        parts.append("### Sources (each block starts with its tag)\n" + body["sources_text"].strip()[:52000])
     if (body.get("pasted") or "").strip():
         parts.append("### Notes from the user\n" + body["pasted"].strip()[:20000])
     if body.get("document_id"):
@@ -861,6 +863,8 @@ def _clean(s: dict, o: dict) -> dict:
            "chart": s.get("chart") if isinstance(s.get("chart"), dict) else {}, "figure": s.get("figure") if isinstance(s.get("figure"), dict) else {},
            "quote": {"text": str((s.get("quote") or {}).get("text") or ""), "by": str((s.get("quote") or {}).get("by") or "")} if isinstance(s.get("quote"), dict) else {"text": "", "by": ""},
            "caption": str(s.get("caption") or ""), "notes": str(s.get("notes") or "")}
+    if isinstance(s.get("sources"), list) and s["sources"]:  # which of several sources (S1, S2...) the slide draws on
+        out["sources"] = [str(x).strip()[:8] for x in s["sources"] if str(x).strip()][:6]
     if out["chart"].get("chart_id") is not None and not out["chart"].get("sheet_id"):
         out["chart"]["sheet_id"] = o.get("sheet_id", "")
     return out
@@ -925,6 +929,10 @@ async def content(body: dict) -> dict:
         chart_rule = 'chart: {"chart_id": number} from the list;'
         figure_rule = 'figure: {"url": "...", "caption": "..."} from the image list.'
         quote_key = ""
+    src_rule = src_key = ""
+    if body.get("source_tags"):
+        src_rule = '\n- sources: the tags of the source blocks the slide really draws on, e.g. ["S1", "S3"]; never a tag that is not in the material.'
+        src_key = '"sources": [], '
     for a in range(0, len(outl), 12):
         b = min(len(outl), a + 12)
         prompt = f"""Write the slides {a + 1}-{b} of this presentation.
@@ -944,8 +952,8 @@ Rules:
   {figure_rule}
 - two_column: "left"/"right" each {{"heading": "...", "bullets": [...]}}.
 - references: leave bullets empty (A.F.R.A writes the list).
-- notes: {"what the speaker says, 60-120 words" if notes else "empty string"}.
-Return JSON: {{"slides": [{{"n": {a + 1}, "layout": "...", "title": "...", "subtitle": "", "bullets": [], "left": {{}}, "right": {{}}, "table": {{}}, "chart": {{}}, "figure": {{}}, {quote_key}"caption": "", "notes": ""}}]}}
+- notes: {"what the speaker says, 60-120 words" if notes else "empty string"}.{src_rule}
+Return JSON: {{"slides": [{{"n": {a + 1}, "layout": "...", "title": "...", "subtitle": "", "bullets": [], "left": {{}}, "right": {{}}, "table": {{}}, "chart": {{}}, "figure": {{}}, {quote_key}{src_key}"caption": "", "notes": ""}}]}}
 with exactly one entry per outline slide {a + 1}-{b}, in order."""
         j = await complete_json(prompt, SYSTEM, task="slides-content")
         got = j.get("slides") if isinstance(j, dict) else j

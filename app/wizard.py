@@ -22,7 +22,7 @@ import secrets
 import threading
 import time
 
-from . import db, designs, gslides, research, simple_pdf, tugas, tugas_decks
+from . import db, designs, gslides, research, simple_pdf, sources, tugas, tugas_decks
 from . import google_api as g
 from .citations import bibliography, process_citations
 from .config import DATA_DIR, get_settings, replace_file
@@ -33,7 +33,7 @@ LAYOUTS = gslides.KNOWN  # title section content two_column figure image_left im
 MAX_SLIDES = 80
 NO_GOOGLE = "Connect a Google account first: Settings \u203a Google."
 NEEDS_APPROVAL = "Approve the essay first: Create into PPT only starts from an essay you have approved."
-UPLOADS = (".txt", ".md", ".markdown", ".docx", ".pdf")
+UPLOADS = sources.SUPPORTED  # .txt .md .markdown .docx .pdf .pptx
 JOBS: dict[str, dict] = {}
 _LOCK = threading.RLock()
 WID_RE = re.compile(r"^[0-9a-f]{10}$")
@@ -69,7 +69,25 @@ def public(st: dict) -> dict:
     out = {k: v for k, v in st.items() if k != "materials"}
     out["materials"] = [{"id": m["id"], "name": m["name"], "chars": len(m["text"])} for m in st.get("materials") or []]
     out["essay_info"] = essay_info(st)
+    if st["source"]["type"] == "multi":
+        out["source_labels"] = [source_label(r) for r in st["source"].get("items") or []]
     return out
+
+
+def source_label(r: dict) -> dict:
+    """The chip for one picked source: what it is called and whether it still exists."""
+    t = r["type"]
+    if t == "doc":
+        d = db.get_document(r["id"])
+        name = d["title"] if d else ""
+    elif t == "paper":
+        p = db.get_paper(r["id"], with_fulltext=False)
+        name = (p.get("title") or "Untitled") if p else ""
+    elif t in ("file", "folder"):
+        name = (r["path"].rsplit("/", 1)[-1] if r["path"] else "All Tugas") + ("/" if t == "folder" else "")
+    else:
+        name = ""
+    return {**r, "name": name or "(no longer available)", "ok": bool(name)}
 
 
 def listing() -> list[dict]:
@@ -90,8 +108,8 @@ def delete(wid: str):
 
 def new(body: dict) -> dict:
     mode = body.get("mode") or "blank"
-    if mode not in ("topic", "upload", "doc", "paper", "blank"):
-        raise ValueError("Pick how to start: a topic, uploaded documents, a document, a reading or a blank deck.")
+    if mode not in ("topic", "upload", "doc", "paper", "multi", "blank"):
+        raise ValueError("Pick how to start: a topic, uploaded documents, a document, a reading, several sources or a blank deck.")
     pid = body.get("project_id") or ""
     if not any(p["id"] == pid for p in db.list_projects()):
         raise ValueError("Pick a project first.")
@@ -103,6 +121,12 @@ def new(body: dict) -> dict:
         st["source"] = {"type": "essay"}
     elif mode == "upload":
         st["source"] = {"type": "uploads"}
+    elif mode == "multi":
+        refs = sources.clean_refs(body.get("sources") or [])
+        if not refs:
+            raise ValueError("Pick at least one source.")
+        st["source"] = {"type": "multi", "items": refs}
+        st["title"] = st["title"] or "New deck"
     elif mode == "doc":
         d = db.get_document(body.get("doc_id") or "")
         if not d:
@@ -152,6 +176,11 @@ def patch(wid: str, body: dict) -> dict:
         for k in ("folder", "account"):
             if k in n:
                 o[k] = str(n[k] or "")
+    if "sources" in body:
+        if st["source"]["type"] != "multi":
+            raise ValueError("This draft doesn't start from several sources.")
+        st["source"]["items"] = sources.clean_refs(body["sources"])
+        st["mockup"] = None  # the mockup belongs to the sources it was written from
     if body.get("step") in STEPS:
         st["step"] = body["step"]
     return save(st)
@@ -188,6 +217,9 @@ def source_ready(st: dict):
     elif t == "uploads":
         if not st.get("materials"):
             raise ValueError("Add at least one document first.")
+    elif t == "multi":
+        if not st["source"].get("items") and not st.get("materials"):
+            raise ValueError("Pick at least one source first.")
     elif t == "doc":
         if not db.get_document(st["source"].get("id") or ""):
             raise ValueError("That A.F.R.A document no longer exists.")
@@ -374,14 +406,13 @@ def export_google_doc(wid: str, account: str | None = None) -> dict:
 
 # ---------------------------------------------------------------- uploaded documents
 def add_material(wid: str, filename: str, data: bytes) -> dict:
-    from .gaps import manuscript_text
     name = (filename or "file").replace("\\", "/").rsplit("/", 1)[-1]
     if not name.lower().endswith(UPLOADS):
-        raise ValueError("Upload a .txt, .md, .docx or .pdf file.")
+        raise ValueError("Upload a .txt, .md, .docx, .pdf or .pptx file.")
     st = load(wid)
-    if st["source"]["type"] != "uploads":
+    if st["source"]["type"] not in ("uploads", "multi"):
         raise ValueError("This draft doesn't start from uploaded documents.")
-    text = manuscript_text(name, data).strip()
+    text = sources.extract_text(name, data)
     if not text:
         raise ValueError(f"No text found in {name} (a scanned PDF has no text to read).")
     return _put_material(st, name, text)
@@ -390,7 +421,7 @@ def add_material(wid: str, filename: str, data: bytes) -> dict:
 def _put_material(st: dict, name: str, text: str) -> dict:
     m = {"id": secrets.token_hex(4), "name": name[:120], "text": text[:60000]}
     st.setdefault("materials", []).append(m)
-    st["materials"] = st["materials"][-12:]
+    st["materials"] = st["materials"][-(30 if st["source"]["type"] == "multi" else 12):]
     st["analysis"] = None  # the analysis belongs to the files it read
     st["mockup"] = None
     save(st)
@@ -598,6 +629,8 @@ def merge_slides(a: dict, b: dict) -> dict:
     out["title"] = a["title"] or b["title"]
     out["notes"] = "\n".join(x for x in (a.get("notes"), b.get("notes")) if x)
     out["source"] = "; ".join(dict.fromkeys(x for x in (a.get("source"), b.get("source")) if x))[:400]
+    if a.get("sources") or b.get("sources"):
+        out["sources"] = list(dict.fromkeys((a.get("sources") or []) + (b.get("sources") or [])))
     if a["layout"] == "table" and b["layout"] == "table" and ta.get("rows") and tb.get("rows") and len(ta["rows"][0]) == len(tb["rows"][0]):
         out["table"] = {"header": ta.get("header") or tb.get("header") or [], "rows": ta["rows"] + tb["rows"]}
         return out
@@ -746,13 +779,29 @@ async def make_mockup(wid: str, step=lambda s: None) -> dict:
     else:
         ensure_ai()
         body = material_body(st)
+        items = []
+        if st["source"]["type"] == "multi":
+            step("Reading the sources\u2026")
+            items, notes = await asyncio.to_thread(sources.collect, st["source"].get("items") or [], st.get("materials"))
+            body["sources_text"] = await sources.digest(items, language=st["options"].get("language", ""))
+            body["source_tags"] = True
+            keys = [i["key"] for i in items if i["kind"] == "paper" and i["key"]]
+            body.update(keys=keys, use_library=bool(keys), topic=st["topic"] or st["title"] or "the sources")
+            st["source_list"] = [{k: i[k] for k in ("tag", "kind", "label", "key")} for i in items]
+            st["source_notes"] = notes
         step("Writing the outline\u2026")
         outline = await gslides.outline(body)
         step(f"Writing {len(outline['slides'])} slides\u2026")
         done = await gslides.content({**body, "outline": outline})
         m = from_engine(done["slides"], outline.get("title") or st["title"])
+        if items:
+            m = apply_sources(m, items)
         flags, missing = done["flags"], done["missing"]
-    st = load(wid)  # the page may have saved something while the AI worked
+    fresh = load(wid)  # the page may have saved something while the AI worked
+    for k in ("source_list", "source_notes"):
+        if k in st:
+            fresh[k] = st[k]
+    st = fresh
     st.update(mockup=m, step="mockup", title=st["title"] or m["title"], mockup_notes={"flags": flags, "missing": missing})
     save(st)
     return public(st)
@@ -845,9 +894,47 @@ def resolve_citations(slides: list[dict], project_id: str, style: str) -> tuple[
     return slides, missing
 
 
+def apply_sources(m: dict, items: list[dict]) -> dict:
+    """Each slide records which of the sources it came from (tags S1, S2...) and shows them as its Source line;
+    with a single source every content slide gets it."""
+    for s in m["slides"]:
+        picked = sources.map_tags(s.get("sources") or [], items)
+        if not picked and len(items) == 1 and s["layout"] in NEEDS_SOURCE:
+            picked = items
+        if picked:
+            s["sources"] = [i["tag"] for i in picked]
+            if not (s.get("source") or "").strip():
+                s["source"] = "; ".join(dict.fromkeys(sources.source_text(i) for i in picked))
+        else:
+            s.pop("sources", None)
+    return validate(m)
+
+
+def add_reference_lines(slides: list[dict], lines: list[str]) -> list[dict]:
+    """The References slide also lists sources that are not library papers (documents, lecture files)."""
+    if not lines:
+        return slides
+    ref = next((s for s in slides if s["layout"] == "references"), None)
+    if not ref:
+        ref = blank_slide("references")
+        ref.update(title="References", bullets=[])
+        at = len(slides) - 1 if slides and slides[-1]["layout"] == "closing" else len(slides)
+        slides.insert(at, ref)
+    ref["bullets"] = list(dict.fromkeys(ref["bullets"] + lines))
+    return slides
+
+
 def prepare(st: dict) -> tuple[list[dict], list[str]]:
     m = validate(st.get("mockup") or {})
+    by = {i["tag"]: i for i in st.get("source_list") or []}
+    used = list(dict.fromkeys(t for s in m["slides"] for t in s.get("sources") or [] if t in by))
+    for s in m["slides"]:  # a library paper a slide drew on is always cited, so it reaches the reference list
+        for t in s.get("sources") or []:
+            i = by.get(t)
+            if i and i["kind"] == "paper" and i["key"] and f"[@{i['key']}]" not in s.get("source", ""):
+                s["source"] = "; ".join(x for x in (s.get("source"), f"[@{i['key']}]") if x)
     slides, missing = resolve_citations(m["slides"], st["project_id"], gslides._project_style(st["project_id"]))
+    slides = add_reference_lines(slides, [by[t]["label"] for t in used if by[t]["kind"] != "paper" or not by[t]["key"]])
     if not st["options"].get("notes", True):
         for s in slides:
             s["notes"] = ""

@@ -116,6 +116,71 @@ def build(title: str, markdown: str, refs: list[str] | None = None) -> bytes:
     if cur or not pages:
         pages.append(cur)
 
+    return _assemble(pages)
+
+
+def latin_only(text: str) -> bool:
+    """True when every letter can be set in the built-in fonts (Windows Western European)."""
+    try:
+        text.encode("cp1252")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def build_columns(title: str, blocks: list[dict], cols: int = 3, size: float = 7.0, margin: float = 28.0, break_before: int | None = None) -> bytes:
+    """A dense multi-column A4 sheet (cheatsheets). blocks: [{"heading": str, "items": [(text, tag)]}]. Text flows down each
+    column, then the next column, then the next page; `break_before` starts that block on a new page (front and back)."""
+    gap = 12.0
+    colw = (A4[0] - 2 * margin - gap * (cols - 1)) / cols
+    top, bottom, lead = A4[1] - margin, margin, 1.18
+    pages, cur = [], []
+    st = {"col": 0, "y": top}
+
+    def new_page():
+        nonlocal cur
+        if cur:
+            pages.append(cur)
+        cur = []
+        st.update(col=0, y=top)
+
+    def need(h):  # room for h points in this column, else the next column or page
+        if st["y"] - h < bottom:
+            if st["col"] + 1 < cols:
+                st.update(col=st["col"] + 1, y=top)
+            else:
+                new_page()
+
+    def put(lines, sz, bold=False, indent=0.0, after=0.0, before=0.0, keep=0.0, tag=""):
+        need(before + sz * lead * min(len(lines), 2) + keep)
+        st["y"] -= before
+        for i, ln in enumerate(lines):
+            need(sz * lead)
+            st["y"] -= sz * lead
+            x = margin + st["col"] * (colw + gap) + indent
+            if i == 0 and indent:
+                cur.append((x - indent * 0.8, st["y"], sz, False, "•"))
+            cur.append((x, st["y"], sz, bold, ln))
+            if tag and i == len(lines) - 1:
+                cur.append((x + width(ln + " ", sz), st["y"], sz - 1.5, False, tag))
+        st["y"] -= after
+
+    if title:
+        cur.append((margin, st["y"] - size * 2, size + 5, True, plain(title)[:90]))
+        st["y"] -= size * 3.2
+    for n, b in enumerate(blocks):
+        if break_before is not None and n == break_before and cur:
+            new_page()
+        put(wrap(plain(b["heading"]), size + 1, colw, True), size + 1, True, before=3, after=1.5, keep=size * lead * 2)
+        for text, tag in b["items"]:
+            tag = f"[{tag}]" if tag else ""
+            put(wrap(plain(text), size, colw - size * 0.9 - (width(tag, size - 1.5) if tag else 0)), size, indent=size * 0.9, after=1.2, tag=tag)
+    if cur or not pages:
+        pages.append(cur)
+    return _assemble(pages)
+
+
+def _assemble(pages) -> bytes:
     objs: list[bytes] = [b"", b"", b"", b"", b""]  # 1 catalog, 2 pages, 3 regular font, 4 bold font, 5 reserved
     kids = []
     for items in pages:
