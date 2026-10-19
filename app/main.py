@@ -1178,6 +1178,26 @@ def designs_folder():
     return designs.folder_status()
 
 
+@app.get("/api/greatppt")
+async def greatppt_status():
+    """Is GreatPPT connected (a sign-in the USER made in A.F.R.A's own browser window)?"""
+    return await asyncio.to_thread(greatppt.status)
+
+
+@app.post("/api/greatppt/connect")
+async def greatppt_connect():
+    """Opens a visible browser window at GreatPPT's sign-in page. A.F.R.A never sees the password."""
+    try:
+        return await asyncio.to_thread(greatppt.connect)
+    except template_import.Stop as s:
+        raise HTTPException(422, s.message)
+
+
+@app.post("/api/greatppt/disconnect")
+async def greatppt_disconnect():
+    return await asyncio.to_thread(greatppt.disconnect)
+
+
 @app.get("/api/downloads/watch")
 def downloads_watch():
     """The Downloads watcher: on or off, which folder, move or copy."""
