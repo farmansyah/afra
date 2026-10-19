@@ -7,6 +7,20 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def documents_dir() -> Path:
+    """The Documents folder File Explorer shows; on Windows it is often moved into OneDrive, away from ~/Documents."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(260)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:  # 5 = CSIDL_PERSONAL
+                return Path(buf.value)
+        except (OSError, AttributeError):
+            pass
+    docs = Path.home() / "Documents"
+    return docs if docs.exists() else Path.home()
+
+
 def replace_file(tmp: Path, dst: Path) -> None:
     """os.replace that rides out Windows' brief "Access is denied" while OneDrive, antivirus or the indexer holds dst."""
     for i in range(10):

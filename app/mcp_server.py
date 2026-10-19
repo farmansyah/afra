@@ -219,8 +219,21 @@ def t_save(a):
     return f"Created '{d['title']}' (id {d['id']}) in project '{p['name']}'. The user sees it under Documents in A.F.R.A."
 
 
+def _documents() -> Path:
+    """Same as app.config.documents_dir (this file runs on its own, so it can't import the app)."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(260)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
+                return Path(buf.value)
+        except (OSError, AttributeError):
+            pass
+    return Path.home() / "Documents"
+
+
 def _export_dir() -> Path:
-    for d in (Path.home() / "Documents" / "AFRA exports", BASE_DIR / "data" / "exports"):
+    for d in (_documents() / "AFRA exports", BASE_DIR / "data" / "exports"):
         try:
             d.mkdir(parents=True, exist_ok=True)
             return d

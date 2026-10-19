@@ -17,7 +17,7 @@ from pathlib import Path
 from send2trash import send2trash
 
 from . import db
-from .config import get_settings
+from .config import documents_dir, get_settings
 
 META = ".afra.json"
 BAD_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -31,13 +31,15 @@ class TugasError(ValueError):
 
 
 def default_dir() -> Path:
-    docs = Path.home() / "Documents"
-    return (docs if docs.exists() else Path.home()) / "A.F.R.A Tugas"
+    return documents_dir() / "A.F.R.A Tugas"
 
 
 def root() -> Path:
     p = Path((get_settings().get("tugas_dir") or "").strip() or default_dir()).expanduser()
-    p.mkdir(parents=True, exist_ok=True)
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise TugasError(f"A.F.R.A can't use the Tugas folder {p} ({e.strerror or e}). Choose another one in Settings › Tugas folder.")
     return p.resolve()
 
 
