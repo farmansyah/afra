@@ -284,6 +284,10 @@ async function pollClaude() {
     } else if (e.kind === "doc_new") { linkToast("Claude added a document.", "#docs"); if (h === "#docs") route(); }
     else if (e.kind === "library") { refreshLibKeys(); if (h === "#library") route(); else linkToast("Claude added to your library.", "#library"); }
     else if (e.kind === "export") toast("Claude saved a Word file in Documents › AFRA exports", "ok");
+    else if (e.kind === "design_added") {  // the Downloads watcher moved a template into the Designs folder
+      toast(e.message || "A design was added", "ok");
+      if ($("#dopenf")?.isConnected) route();  // the Designs list refreshes
+    }
   }
 }
 let SYNC_SEEN = null;
@@ -2165,6 +2169,13 @@ VIEWS.settings = async () => {
     <h3 style="margin-top:16px">Designs folder</h3><p class="small muted" style="margin-top:0">Any .pptx in this folder (subfolders too) shows up as a design on the Slides page and in <b>New deck</b>. Leave empty for the <code>_Designs</code> folder inside the Tugas folder. <span id="dfcount"></span></p>
     <div class="row"><input type="text" id="s_designs_dir" class="grow" value="${esc(s.designs_dir || "")}" placeholder="e.g. D:/Kuliah/Designs"><button class="btn" id="opendf">Open Designs folder</button></div>
     <label class="f">Model that reads template previews <small>(only when a template has no .pptx to download; needs an OpenRouter key)</small></label><div class="row"><select id="s_template_vision_model" class="grow" data-cur="${esc(s.template_vision_model || "")}"><option value="${esc(s.template_vision_model || "")}">${esc(s.template_vision_model || "Recommended")}</option></select><button class="btn" id="visref" title="Fetch the latest list from OpenRouter">↻</button></div><div class="small muted" id="vismsg"></div></div>
+  <div class="card" style="margin-bottom:16px"><h3>Templates</h3>
+    <h4 style="margin:0 0 4px">Downloads watcher</h4><p class="small muted" style="margin-top:0">When you download a <b>.pptx</b> (or .potx) template in your own browser, A.F.R.A picks it up from your Downloads folder and puts it in the Designs folder, with its credit when it can tell which site it came from. Only files that appear <b>after</b> A.F.R.A started are looked at; older downloads are never touched, and files that aren't real PowerPoint files are left alone.</p>
+    <div class="grid g3" style="gap:10px"><div><label class="f">Watcher</label><select id="s_downloads_watch"><option value="on"${s.downloads_watch === false || s.downloads_watch === "off" ? "" : " selected"}>On</option><option value="off"${s.downloads_watch === false || s.downloads_watch === "off" ? " selected" : ""}>Off</option></select></div>
+      <div><label class="f">Downloaded file</label><select id="s_downloads_action"><option value="move"${s.downloads_action === "copy" ? "" : " selected"}>Move into Designs</option><option value="copy"${s.downloads_action === "copy" ? " selected" : ""}>Copy (keep it in Downloads too)</option></select></div>
+      <div><label class="f">Folder to watch <small>(empty = your Downloads folder)</small></label><input type="text" id="s_downloads_dir" value="${esc(s.downloads_dir || "")}" placeholder="Your Downloads folder"></div></div>
+    <div class="row" style="margin-top:8px"><button class="btn primary" id="savetpl">Save</button><span class="small muted" id="dlwatch"></span></div>
+    <div id="gpBox" style="margin-top:14px"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Shared library</h3><div id="syncBox" class="small muted">Checking…</div></div>
   <div class="card" style="margin-bottom:16px"><h3>Slides (PowerPoint)</h3><p class="small muted" style="margin-top:0">From any document: open it and click <b>Slides</b>. Here you can prepare PPT Master in advance.</p><div id="slidesBox"></div></div>
   <div class="card" style="margin-bottom:16px"><h3>Google Slides and Drive</h3><p class="small muted" style="margin-top:0">Decks are made under <a href="#gslides">Slides</a>. Connect one or more Google accounts here or there.</p><div id="googleBox" class="small muted">Checking…</div></div>
@@ -2287,7 +2298,9 @@ VIEWS.settings = async () => {
   };
   const doSave = async (quiet) => { S.settings = await api("/api/settings", { method: "PUT", body: collect() }); renderLLMStatus(); if (quiet !== true) toast("Settings saved", "ok"); };
   $("#save1").onclick = async () => { await doSave(); loadModels(true); };
-  $("#save2").onclick = $("#save3").onclick = $("#savetg").onclick = doSave;
+  $("#save2").onclick = $("#save3").onclick = $("#savetg").onclick = $("#savetpl").onclick = async () => { await doSave(); watchInfo(); };
+  const watchInfo = () => api("/api/downloads/watch").then((w) => { $("#dlwatch").textContent = w.enabled ? `Watching ${w.folder}${w.exists ? "" : " (folder not found)"}` : "The watcher is off."; }).catch(() => { });
+  watchInfo();
   const dfCount = () => api("/api/designs/folder").then((f) => { $("#dfcount").textContent = `${f.count} .pptx file${f.count === 1 ? "" : "s"} in ${f.path}`; }).catch(() => { });
   dfCount();
   $("#opendf").onclick = (e) => busy(e.currentTarget, async () => { await doSave(true); await api("/api/designs/folder/open", { method: "POST" }); dfCount(); });

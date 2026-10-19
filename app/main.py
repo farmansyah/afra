@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
-from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, wizard
+from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, watcher, wizard
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -79,8 +79,19 @@ async def _sync_loop():
         await asyncio.sleep(8)
 
 
+async def _downloads_loop():
+    """The Downloads watcher: a .pptx the user downloads in their browser (new files only) is moved or copied into the Designs folder."""
+    while True:
+        try:
+            await asyncio.to_thread(watcher.WATCHER.tick)
+        except Exception as e:  # never let the watcher crash the server
+            print("downloads watcher:", e)
+        await asyncio.sleep(watcher.POLL_SECS)
+
+
 @app.on_event("startup")
 async def _startup():
+    asyncio.create_task(_downloads_loop())
     asyncio.create_task(_sync_loop())
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_file_sync_loop())
@@ -309,7 +320,7 @@ async def notes():
 
 @app.get("/api/events")
 def events(since: float = 0):
-    return {"now": time.time(), "events": [e for e in EVENTS if e["ts"] > since]}
+    return {"now": time.time(), "events": [e for e in EVENTS if e["ts"] > since] + watcher.WATCHER.events_since(since)}
 
 
 @app.get("/api/handoff")
@@ -1165,6 +1176,12 @@ async def designs_add(body: dict):
 @app.get("/api/designs/folder")
 def designs_folder():
     return designs.folder_status()
+
+
+@app.get("/api/downloads/watch")
+def downloads_watch():
+    """The Downloads watcher: on or off, which folder, move or copy."""
+    return watcher.WATCHER.status()
 
 
 @app.post("/api/designs/folder/open")
