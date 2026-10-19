@@ -106,3 +106,10 @@ A dedicated **Tugas** page in the sidebar: a Finder-style view of real folders o
 1. Tugas page: folder tree and grid, new folder, rename, move (drag and drop), delete to the Recycle Bin, add files, open in the default app or show in File Explorer, link A.F.R.A documents, due dates.
 2. New deck in a folder from a saved design (the Slides studio's designs), and "Open in Google Slides" for any .pptx.
 3. Template import from links: direct .pptx download first, REA + GLM rebuild second.
+
+#### Added 2026-10-19
+- **Designs folder:** a folder on disk (default `A.F.R.A Tugas/_Designs`, changeable in Settings) where people can drop any number of .pptx files. Every .pptx in it, subfolders included, shows up in the design selection automatically: a thumbnail and name, refreshed when files are added, changed or removed. Templates imported from links are saved into this folder too, so the folder is the one place for all designs.
+- **Step 3 details:** links from Slidesgo, SlidesCarnival, Microsoft templates and others. Free templates only.
+  - First try the site's own free .pptx download.
+  - Otherwise A.F.R.A starts Edge or Chrome headless with a loopback debugging port. REA (`rea inspect-web-page`, `rea capture-web-screenshot`) captures the preview slides. A GLM vision model through OpenRouter turns each preview into a layout spec, and `pptx_build` renders it as an editable .pptx.
+  - When REA or a GLM key is missing, say so plainly and keep the direct-download path working.
