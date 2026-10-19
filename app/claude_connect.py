@@ -45,7 +45,7 @@ def status() -> dict:
     installed = [f for f in files if f.parent.exists()]
     connected = any((_read(f).get("mcpServers") or {}).get(NAME) == entry() for f in installed)
     return {"claude_installed": bool(installed), "connected": connected, "entry": entry(),
-            "config_file": str((installed or files)[0])}
+            "config_file": str((installed or files)[-1])}  # the Store app reads its own copy, listed last
 
 
 def snippet() -> str:
