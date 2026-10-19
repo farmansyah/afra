@@ -34,6 +34,7 @@ const copyText = async (text) => {
   let ok = false; try { ok = document.execCommand("copy"); } catch { }
   ta.remove(); return ok;
 };
+const copyAnd = async (text, ...msg) => { if (await copyText(text)) toast(...msg); else toast("Couldn't copy here: select the text and press Ctrl+C", "bad"); };
 
 // ------------------------------------------------------------------ api
 async function api(path, opts = {}) {
@@ -135,14 +136,14 @@ Save sources to ${projName()} and the review as a document.` : null;
   return null;
 }
 function showHandoff(prompt) {
-  try { navigator.clipboard.writeText(prompt); } catch { }
+  copyText(prompt);
   openClaude(claudeLink(prompt));
   const box = modal(`<h3 style="margin-top:0">Continue in the Claude app</h3>
     <p class="small muted" style="margin-top:0">This job runs in Claude on your Claude plan. Claude opened with the request below already typed: press <b>Enter</b> there. Claude works through A.F.R.A and the results (papers, documents) appear here by themselves. If Claude didn't open, click <b>Open Claude</b> and paste (${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}+V): it's copied.</p>
     <textarea readonly style="width:100%;height:170px;font-size:12px">${esc(prompt)}</textarea>
     <div class="row" style="margin-top:10px"><a class="btn primary" href="${esc(claudeLink(prompt))}" id="hopen">Open Claude</a><button class="btn" id="hcopy">Copy again</button><button class="btn ghost" id="hclose">Close</button>
     <span class="small muted" style="margin-left:auto">Prefer an API key? <a href="#settings" id="hset">Settings</a></span></div>`);
-  $("#hcopy", box).onclick = () => { navigator.clipboard.writeText(prompt).then(() => toast("Copied", "ok")); };
+  $("#hcopy", box).onclick = () => { copyAnd(prompt, "Copied", "ok"); };
   $("#hclose", box).onclick = closeModal; $("#hset", box).onclick = closeModal;
 }
 // ------------------------------------------------------------------ slides: Claude chat (quick) or PPT Master (Code tab)
@@ -151,7 +152,7 @@ async function slidesPanel(el, title) {
   const quick = `Use the A.F.R.A make_slides workflow for my document "${title || "…"}". It's a 10-minute presentation.`;
   const designer = `Make a presentation with PPT Master from my A.F.R.A document "${title || "…"}" (10 minutes, my language). Use slide_material for the text and references.`;
   let st = {}; try { st = await api("/api/slides"); } catch { }
-  const copyBtn = (id, text) => { const b = $("#" + id, el); if (b) b.onclick = () => { navigator.clipboard.writeText(text).then(() => toast("Copied: paste it in Claude", "ok")); }; };
+  const copyBtn = (id, text) => { const b = $("#" + id, el); if (b) b.onclick = () => { copyAnd(text, "Copied: paste it in Claude", "ok"); }; };
   el.innerHTML = `<div class="grid g2" style="gap:12px">
     <div class="card" style="margin:0"><h3>Quick slides <small class="muted">Claude chat</small></h3>
       <ol class="small" style="padding-left:18px;margin:6px 0"><li>Open the Claude app, start a new chat.</li><li>Paste the request (${mod}+V). Claude reads the document through A.F.R.A and gives you an editable .pptx to download.</li></ol>
@@ -199,7 +200,7 @@ async function studioPanel(el, ctx = {}) {
     <div class="row" style="margin-top:10px;flex-wrap:wrap">${idea.installed || reel.installed ? `<a class="btn small" href="claude://">Open Claude</a>` : ""}
       ${idea.installed ? `<button class="btn small ghost" id="stkeys">Connector keys${st.openreview ? "" : " (OpenReview not set)"}</button>` : ""}
       ${idea.installed || reel.installed ? `<button class="btn small ghost" id="stup" ${working ? "disabled" : ""}>Update ResearchStudio</button>` : ""}</div>`;
-  $$("[data-stcopy]", el).forEach((b) => b.onclick = () => navigator.clipboard.writeText(asks[b.dataset.stcopy]).then(() => toast("Copied: paste it in the Code tab", "ok")));
+  $$("[data-stcopy]", el).forEach((b) => b.onclick = () => copyAnd(asks[b.dataset.stcopy], "Copied: paste it in the Code tab", "ok"));
   const go = async (k) => { await api("/api/studio/setup", { body: { part: k } }); studioPanel(el, ctx); };
   $$("[data-stset]", el).forEach((b) => b.onclick = () => go(b.dataset.stset));
   const up = $("#stup", el); if (up) up.onclick = async () => { if (!confirm("Download the latest ResearchStudio?")) return; for (const k of ["idea", "reel"]) if (P[k]?.installed) { await go(k); break; } };
@@ -235,7 +236,7 @@ function claudeExec(path, body) {
   if (location.port === "8770") throw new Error("AI tasks start from the computer: Claude runs there, not on the phone.");
   const id = Math.random().toString(36).slice(2, 10), label = execLabel(path, body);
   const msg = `A.F.R.A task ${id}: ${label}. Please do it (get_task, then finish_task).`, url = claudeLink(msg);
-  try { navigator.clipboard.writeText(msg); } catch { }
+  copyText(msg);
   const ctrl = new AbortController();
   WAITING.set(id, { label, url, cancel: () => { ctrl.abort(); fetch(`/api/handoff/${id}/cancel`, { method: "POST" }); } });
   drawWaiting(); openClaude(url);
@@ -626,7 +627,7 @@ VIEWS.research = async () => {
         $("#rExport").onclick = () => exportDialog({ markdown: run.report, meta: {} });
         $("#rSave").onclick = async () => { const d = await api(`/api/projects/${S.project.id}/documents`, { body: { title: (run.report.match(/^#\s+(.+)$/m) || [, run.query])[1].slice(0, 120), content: run.report, kind: "doc" } }); toast("Saved to Documents", "ok"); location.hash = "#docs/" + d.id; };
         $("#rAddAll").onclick = (e) => busy(e.currentTarget, async () => { const r = await api(`/api/research/${id}/add-sources`, { method: "POST" }); await refreshLibKeys(); toast(`${r.added} sources in library`, "ok"); });
-        $("#rCopy").onclick = () => { navigator.clipboard.writeText(run.report); toast("Copied"); };
+        $("#rCopy").onclick = () => { copyAnd(run.report, "Copied"); };
         $("#rDel").onclick = async () => { if (!confirm("Delete this run?")) return; await api(`/api/research/${id}`, { method: "DELETE" }); pane.innerHTML = ""; loadRuns(); };
       }
     };
@@ -807,7 +808,7 @@ function evidenceTab() {
     <div class="row" style="margin-top:10px"><button class="btn primary" id="evgo">Find evidence</button></div></div><div id="evres"></div>`;
   $("#evgo").onclick = (e) => busy(e.currentTarget, async () => {
     const claim = $("#evc").value.trim(); if (!claim) return toast("Write your argument first");
-    await runEvidence(claim, $("#evres"), (cite) => { navigator.clipboard.writeText(cite).catch(() => { }); toast(`Added to library — ${cite} copied`, "ok"); }, $$("#evSrc input:checked").map((x) => x.value));
+    await runEvidence(claim, $("#evres"), (cite) => { copyText(cite); toast(`Added to library — ${cite} copied`, "ok"); }, $$("#evSrc input:checked").map((x) => x.value));
   });
 }
 function manuscriptTab() {
@@ -834,7 +835,7 @@ function manuscriptTab() {
       $("#msgap").onclick = () => { S.gapTopic = [a.title, a.research_question].filter(Boolean).join("\n"); location.hash = "#gaps"; };
       const md_ = $("#msdoi"); if (md_) md_.onclick = (ev) => busy(ev.currentTarget, async () => { const x = await api(`/api/projects/${S.project.id}/papers/identifier`, { body: { text: a.dois.join("\n") } }); await refreshLibKeys(); toast(`Imported ${x.added.length}${x.failed.length ? `, ${x.failed.length} not found` : ""}`, "ok"); });
       $$("[data-st]").forEach((b) => b.onclick = () => discoverFor(b.dataset.st));
-      $$("[data-cl]").forEach((b) => b.onclick = () => busy(b, () => runEvidence(a.claims_needing_sources[+b.dataset.cl].sentence, $("#clres" + b.dataset.cl), (cite) => { navigator.clipboard.writeText(cite).catch(() => { }); toast(`Added — ${cite} copied; paste it after the sentence`, "ok"); }, ["openalex", "europepmc"])));
+      $$("[data-cl]").forEach((b) => b.onclick = () => busy(b, () => runEvidence(a.claims_needing_sources[+b.dataset.cl].sentence, $("#clres" + b.dataset.cl), (cite) => { copyText(cite); toast(`Added — ${cite} copied; paste it after the sentence`, "ok"); }, ["openalex", "europepmc"])));
     } catch (err) { $("#msres").innerHTML = `<div class="notice bad">${esc(err.message)}</div>`; }
     e.target.value = "";
   };
@@ -981,7 +982,7 @@ VIEWS.library = async () => {
   $("#bibPrev").onclick = async () => {
     const box = modal(`<h2>Bibliography</h2><div class="row"><select id="bst" style="width:220px">${Object.entries(S.meta.styles).map(([k, v]) => `<option value="${k}" ${k === S.settings.default_citation_style ? "selected" : ""}>${v}</option>`).join("")}</select><button class="btn small" id="bcopy">Copy</button></div><div id="bl" class="prose" style="font-size:14px;margin-top:12px"></div>`, true);
     const show = async () => { const r = await api(`/api/projects/${S.project.id}/bibliography?style=${$("#bst").value}`); $("#bl").innerHTML = r.entries.map((x) => `<p style="padding-left:2em;text-indent:-2em;margin:0 0 8px">${md(x).replace(/^<p>|<\/p>\s*$/g, "")}</p>`).join(""); };
-    $("#bst", box).onchange = show; $("#bcopy", box).onclick = () => { navigator.clipboard.writeText($("#bl").innerText); toast("Copied"); }; show();
+    $("#bst", box).onchange = show; $("#bcopy", box).onclick = () => { copyAnd($("#bl").innerText, "Copied"); }; show();
   };
   load();
 };
@@ -1015,7 +1016,7 @@ async function paperDialog(id, onChange) {
     <div class="modal-foot" style="justify-content:space-between"><div class="row"><button class="btn danger" id="pdel">Delete</button>
       <button class="btn ghost" id="pshare">💬 Share in chat</button><button class="btn" id="psum">AI reading notes</button>${p.doi || p.openalex_id ? `<button class="btn ghost" data-psb="references">References</button><button class="btn ghost" data-psb="citing">Cited by</button><button class="btn ghost" data-psb="related">Related</button>` : ""}${!p.fulltext && (p.pdf_url || p.url) ? `<button class="btn" id="pft">Fetch full text</button>` : ""}</div>
       <div class="row"><button class="btn" onclick="closeModal()">Close</button><button class="btn primary" id="psave">Save</button></div></div>`, true);
-  $("#cpk", box).onclick = () => { navigator.clipboard.writeText(`[@${p.key}]`); toast("Copied"); };
+  $("#cpk", box).onclick = () => { copyAnd(`[@${p.key}]`, "Copied"); };
   $$("[data-psb]", box).forEach((b) => b.onclick = () => { S.snowball = { ident: p.openalex_id || p.doi, mode: b.dataset.psb, title: p.title }; closeModal(); if (location.hash === "#search") route(); else location.hash = "#search"; });
   $("#psave", box).onclick = (e) => busy(e.currentTarget, async () => {
     const val = (k) => $("#e_" + k).value.trim();
@@ -1060,8 +1061,8 @@ async function readerDialog(p) {
     $("#rq_list").innerHTML = qs.map((q) => `<div class="result" style="padding:8px 2px">${q.quote ? `<div style="font-family:var(--serif);font-size:14px">“${esc(q.quote)}”</div>` : ""}${q.comment ? `<div class="small">✎ ${esc(q.comment)}</div>` : ""}
       <div class="row small" style="margin-top:4px"><span class="muted">${q.page ? "p. " + esc(q.page) : ""}</span><button class="btn small ghost" data-qc="${q.id}">Copy quote + citation</button><button class="btn small ghost" data-qk="${q.id}">Copy citation</button><button class="btn small ghost danger" data-qd="${q.id}">✕</button></div></div>`).join("") || `<div class="small muted">No quotes yet.</div>`;
     const byId = Object.fromEntries(qs.map((q) => [q.id, q]));
-    $$("[data-qc]").forEach((b) => b.onclick = () => { const q = byId[b.dataset.qc]; navigator.clipboard.writeText(`“${q.quote}” ${cite(q)}`); toast("Copied: paste it into your document"); });
-    $$("[data-qk]").forEach((b) => b.onclick = () => { navigator.clipboard.writeText(cite(byId[b.dataset.qk])); toast("Citation copied"); });
+    $$("[data-qc]").forEach((b) => b.onclick = () => { const q = byId[b.dataset.qc]; copyAnd(`“${q.quote}” ${cite(q)}`, "Copied: paste it into your document"); });
+    $$("[data-qk]").forEach((b) => b.onclick = () => { copyAnd(cite(byId[b.dataset.qk]), "Citation copied"); });
     $$("[data-qd]").forEach((b) => b.onclick = async () => { if (!confirm("Delete this quote?")) return; await api(`/api/quotes/${b.dataset.qd}`, { method: "DELETE" }); load(); });
   };
   $("#rq_add", box).onclick = async () => {
@@ -1355,7 +1356,7 @@ async function docEditor(id) {
     const out = await streamText("/api/tools/run", { tool, text: sel }, (full) => $("#pout").innerHTML = md(full));
     if ($("#prep")) $("#prep").onclick = () => { ta.value = ta.value.slice(0, s) + out.trim() + ta.value.slice(en); ta.dispatchEvent(new Event("input")); $("#dpanel").innerHTML = ""; };
     $("#pins").onclick = () => { ta.value = ta.value.slice(0, en) + "\n\n" + out.trim() + "\n\n" + ta.value.slice(en); ta.dispatchEvent(new Event("input")); $("#dpanel").innerHTML = ""; };
-    $("#pcopy").onclick = () => { navigator.clipboard.writeText(out); toast("Copied"); };
+    $("#pcopy").onclick = () => { copyAnd(out, "Copied"); };
   });
   $("#dsugg").onclick = (e) => busy(e.currentTarget, async () => {
     const s = ta.selectionStart, en = ta.selectionEnd; const text = (en > s ? ta.value.slice(s, en) : ta.value).slice(0, 12000);
@@ -1405,7 +1406,7 @@ VIEWS.tools = async () => {
       $("#tin").oninput = () => $("#twc").textContent = wordCount($("#tin").value) + " words";
       let out = "";
       $("#tgo").onclick = (e) => busy(e.currentTarget, async () => { out = await streamText("/api/tools/run", { tool: $("#ttool").value, text: $("#tin").value, extra: $("#textra").value, language: $("#tlang").value }, (f) => $("#tout").innerHTML = md(f)); });
-      $("#tcopy").onclick = () => { navigator.clipboard.writeText(out); toast("Copied"); };
+      $("#tcopy").onclick = () => { copyAnd(out, "Copied"); };
     },
     ask: () => {
       $("#tbody").innerHTML = `<div class="card"><p class="muted" style="margin-top:0">Answers use only the abstracts, notes and stored full texts in this project’s library, with <span class="key">[@key]</span> citations.</p>
