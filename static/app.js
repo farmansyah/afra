@@ -1916,13 +1916,22 @@ VIEWS.settings = async () => {
       ? `<div style="color:var(--ok)">✓ Connected to the Claude app.</div><p>${how}</p><p>If A.F.R.A doesn't show up in Claude yet, quit Claude completely and open it again.</p>`
       : `<p style="margin-top:0">Let Claude do the AI work on your <b>Claude Pro/Max plan</b>, with no API key: Claude finds real papers through A.F.R.A, writes into your documents and exports Word files.</p>
          ${c.claude_installed ? "" : `<p>First install the <a href="https://claude.ai/download" target="_blank">Claude desktop app</a> and sign in.</p>`}
-         <button class="btn primary" id="claudego">Connect to Claude</button><p>Then quit Claude and open it again. ${how}</p>`);
+         <button class="btn primary" id="claudego">Connect to Claude</button><p>Then quit Claude and open it again. ${how}</p>`)
+      + (c.blocked ? `<div style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px">
+         <b>Windows didn't let A.F.R.A change Claude's settings, so add it by hand (one time):</b>
+         <ol style="margin:6px 0;padding-left:18px"><li>In Claude, open <b>Settings → Developer → Edit Config</b>. This opens <code>claude_desktop_config.json</code>.</li>
+         <li>Inside <code>"mcpServers": { … }</code>, paste the lines below. If other servers are already listed, put a comma after the one before it. If the file has no <code>"mcpServers"</code> yet, make it <code>{ "mcpServers": { <i>the lines below</i> } }</code>.</li>
+         <li>Save the file, quit Claude completely and open it again.</li></ol>
+         <pre id="claudesnip" style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin:6px 0">${esc(c.snippet)}</pre>
+         <button class="btn" id="claudecopy">Copy</button></div>` : "");
+    const cp = $("#claudecopy");
+    if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(c.snippet); toast("Copied", "ok"); } catch { toast("Select the lines and copy them", "bad"); } };
     $$("[name=aimode]").forEach((r) => r.onchange = async () => {
       S.settings = await api("/api/settings", { method: "PUT", body: { ai_mode: r.value } }); renderLLMStatus(); drawClaude(c);
       toast(r.value === "claude" ? "AI work now runs in the Claude app" : "AI buttons now use your API key", "ok");
     });
     const g = $("#claudego");
-    if (g) g.onclick = () => busy(g, async () => { try { drawClaude(await api("/api/claude/connect", { method: "POST" })); toast("Connected. Quit and reopen Claude.", "ok"); } catch (err) { toast(err.message, "bad"); } });
+    if (g) g.onclick = () => busy(g, async () => { try { const r = await api("/api/claude/connect", { method: "POST" }); drawClaude(r); if (!r.blocked) toast("Connected. Quit and reopen Claude.", "ok"); } catch (err) { toast(err.message, "bad"); } });
   };
   api("/api/claude").then(drawClaude).catch(() => { });
   const PROV = { gdrive: "Google Drive", icloud: "iCloud Drive" };
