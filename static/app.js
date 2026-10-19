@@ -26,6 +26,14 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const main = () => $("#main");
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// copy text; falls back to a hidden textarea where the clipboard API is refused (plain http address, embedded frame)
+const copyText = async (text) => {
+  try { await navigator.clipboard.writeText(text); return true; } catch { }
+  const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0"; document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch { }
+  ta.remove(); return ok;
+};
 
 // ------------------------------------------------------------------ api
 async function api(path, opts = {}) {
@@ -1927,7 +1935,10 @@ VIEWS.settings = async () => {
          <pre id="claudesnip" style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin:6px 0">${esc(c.snippet)}</pre>
          <button class="btn" id="claudecopy">Copy</button></div>` : "");
     const cp = $("#claudecopy");
-    if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(c.snippet); toast("Copied", "ok"); } catch { toast("Select the lines and copy them", "bad"); } };
+    if (cp) cp.onclick = async () => {
+      if (await copyText(c.snippet)) return toast("Copied. Now paste it in Claude's config file.", "ok");
+      getSelection().selectAllChildren($("#claudesnip")); toast("The lines are selected: press Ctrl+C to copy them", "bad");
+    };
     $$("[name=aimode]").forEach((r) => r.onchange = async () => {
       S.settings = await api("/api/settings", { method: "PUT", body: { ai_mode: r.value } }); renderLLMStatus(); drawClaude(c);
       toast(r.value === "claude" ? "AI work now runs in the Claude app" : "AI buttons now use your API key", "ok");
