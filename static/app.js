@@ -1928,11 +1928,13 @@ VIEWS.settings = async () => {
          <button class="btn primary" id="claudego">Connect to Claude</button><p>Then quit Claude and open it again. ${how}</p>`)
       + (c.blocked ? `<div style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px">
          <b>Windows didn't let A.F.R.A change Claude's settings, so add it by hand (one time):</b>
-         <ol style="margin:6px 0;padding-left:18px"><li>In Claude, open <b>Settings → Developer → Edit Config</b>. This opens <code>claude_desktop_config.json</code>.</li>
+         <ol style="margin:6px 0;padding-left:18px"><li>Click <b>Copy</b> below.</li>
+         <li><b>Quit Claude completely first</b> (right-click its icon by the clock → Quit). While Claude is open it rewrites this file and your change disappears.</li>
+         <li>Open the file in Notepad: ${c.config_file ? `press <b>Win+R</b>, paste <code>notepad "${esc(c.config_file)}"</code> and press Enter` : `in Claude, Settings → Developer → Edit Config shows where it is`}.</li>
          <li>${c.snippet.trimStart().startsWith('"mcpServers"')
            ? `Put the cursor right after the very first <code>{</code> at the top of the file, press Enter and paste the lines below (keep the comma at the end).`
            : `Inside <code>"mcpServers": { … }</code>, paste the lines below, and put a comma after the server listed before it.`}</li>
-         <li>Save the file, quit Claude completely and open it again.</li></ol>
+         <li>Save (Ctrl+S), then start Claude again.</li></ol>
          <pre id="claudesnip" style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin:6px 0">${esc(c.snippet)}</pre>
          <button class="btn" id="claudecopy">Copy</button></div>` : "");
     const cp = $("#claudecopy");
