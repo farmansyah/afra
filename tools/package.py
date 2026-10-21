@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".venv", "data", "dist", "__pycache__", ".git", ".claude"}
 EXEC = {"Start AFRA.command", "start.sh", "install.sh"}
+WIN_INSTALLER = "Install A.F.R.A (Windows).cmd"
 
 
 def main():
@@ -28,6 +29,14 @@ def main():
             if f.name in EXEC:  # Mac/Linux scripts must have Unix line endings or they fail to start
                 data = data.replace(b"\r\n", b"\n")
             z.writestr(info, data)
+        # the Windows installer is also placed at the top of the zip, next to start.bat, so it is the first thing people see
+        win = ROOT / "docs" / WIN_INSTALLER
+        if win.exists():
+            info = zipfile.ZipInfo(f"AFRA/{WIN_INSTALLER}", time.localtime(win.stat().st_mtime)[:6])
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = (0o100644 << 16)
+            z.writestr(info, win.read_bytes())
     print(f"Created {out}")
 
 

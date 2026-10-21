@@ -1,6 +1,11 @@
 @echo off
 title AFRA
 cd /d "%~dp0"
+if exist "%~dp0Install A.F.R.A (Windows).cmd" (
+  echo Tip: for the easiest setup ^(runs in the background, Start menu icon^), close this window and double-click "Install A.F.R.A (Windows).cmd".
+  echo Or just wait: this window starts A.F.R.A directly.
+  echo.
+)
 where python >nul 2>nul || (
   echo.
   echo A.F.R.A needs Python ^(free^). The download page is opening now.
