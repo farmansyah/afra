@@ -252,15 +252,21 @@
   <div class="center"><h2>Install in two minutes</h2><p class="muted">No programming needed. A.F.R.A opens in your web browser and runs on your computer.</p></div>
   <div class="two">
     <div class="os"><h3>Windows</h3><ol>
-      <li><a href="https://github.com/farmansyah/afra/archive/refs/heads/main.zip" style="color:var(--gold)">Download</a> and unzip it into a folder you'll keep.</li>
-      <li>Double-click <code>start.bat</code>. If Python is missing, the download page opens: install it and tick <b>“Add python.exe to PATH”</b>, then double-click <code>start.bat</code> again.</li>
-      <li>A.F.R.A opens in your browser, and a desktop shortcut is created for next time.</li></ol></div>
+      <li><b>Easiest:</b> <a href="Install%20A.F.R.A%20(Windows).cmd" download style="color:var(--gold)">download the installer</a> and double-click it. If Windows asks, choose <i>More info</i> then <i>Run anyway</i>.</li>
+      <li><b>Or</b> open <b>PowerShell</b> (Start menu, type <i>PowerShell</i>), paste this line and press Enter:
+        <div style="display:flex;gap:8px;align-items:center;margin:8px 0"><code id="winline" style="flex:1;overflow-x:auto;white-space:nowrap;padding:8px 10px">powershell -ExecutionPolicy Bypass -c &quot;irm https://farmansyah.github.io/afra/install.ps1 | iex&quot;</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('winline').textContent);this.textContent='Copied'" style="cursor:pointer;padding:8px 12px;border-radius:8px;border:0;background:var(--gold);color:#14213d;font-weight:600">Copy</button></div></li>
+      <li>Wait about 2 minutes. You will see a few short progress lines, then <i>Done</i>. A.F.R.A opens in your browser.</li>
+      <li>Next time, open <b>A.F.R.A</b> from the Start menu or the Desktop icon. It runs quietly in the background and starts with Windows, so there is no window to keep open.</li></ol>
+      <p class="muted" style="font-size:14px;margin:6px 0 0">No Python needed (A.F.R.A fetches its own) and no administrator password. To remove it, paste this in PowerShell: <code style="word-break:break-all">powershell -ExecutionPolicy Bypass -c "&amp; ([scriptblock]::Create((irm https://farmansyah.github.io/afra/install.ps1))) -Uninstall"</code></p></div>
     <div class="os"><h3>Mac</h3><ol>
-      <li>Open <b>Terminal</b> (press <b>⌘ Space</b>, type <i>Terminal</i>, press Return).</li>
+      <li>Open <b>Terminal</b> (press <b>&#8984; Space</b>, type <i>Terminal</i>, press Return).</li>
       <li>Paste this line and press Return:
         <div style="display:flex;gap:8px;align-items:center;margin:8px 0"><code id="macline" style="flex:1;overflow-x:auto;white-space:nowrap;padding:8px 10px">curl -fsSL https://farmansyah.github.io/afra/install.sh | bash</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('macline').textContent);this.textContent='Copied'" style="cursor:pointer;padding:8px 12px;border-radius:8px;border:0;background:var(--gold);color:#14213d;font-weight:600">Copy</button></div></li>
-      <li>That's all. A.F.R.A opens in your browser and appears in your Dock. It starts with your Mac, updates itself, and nothing needs approving in Privacy &amp; Security.</li></ol></div>
+      <li>Wait about 2 minutes. A.F.R.A opens in your browser and appears in your Dock and Applications.</li>
+      <li>Next time, click <b>A.F.R.A</b> in the Dock. It starts with your Mac, updates itself, and nothing needs approving in Privacy &amp; Security.</li></ol>
+      <p class="muted" style="font-size:14px;margin:6px 0 0">Macs use this one Terminal line because a downloaded double-click file would be blocked by macOS. To remove it, add <code>-s -- --uninstall</code> after <code>bash</code>.</p></div>
   </div>
+  <p class="muted" style="text-align:center;margin-top:22px"><b>Your data stays on your computer</b> (Windows: <code>%LOCALAPPDATA%\AFRA\data</code>, Mac: <code>~/AFRA/data</code>). Installing again or updating never touches it, and uninstalling keeps it. If you used A.F.R.A from an unzipped folder before, your library is copied over.</p>
   <p class="muted" style="text-align:center;margin-top:26px">Then either use it with your <b>Claude Pro</b> plan (below, no API key), or open <b>Settings</b>, pick an AI provider and paste your key.</p>
 </div></section>
 

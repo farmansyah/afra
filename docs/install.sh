@@ -22,7 +22,7 @@ main() {
 
   step() { printf "\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n" "$*"; }
   fail() { printf "\n\033[1;31m%s\033[0m\n" "$*"; exit 1; }
-  [ "$(uname)" = "Darwin" ] || fail "This installer is for macOS. On Windows, unzip A.F.R.A and double-click start.bat."
+  [ "$(uname)" = "Darwin" ] || fail "This installer is for macOS. On Windows, open PowerShell and paste: powershell -ExecutionPolicy Bypass -c \"irm https://farmansyah.github.io/afra/install.ps1 | iex\""
 
   if [ "${1:-}" = "--uninstall" ]; then
     launchctl bootout "gui/$UID_/$LABEL" 2>/dev/null || true

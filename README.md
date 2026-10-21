@@ -9,35 +9,48 @@ own computer, in your web browser, and keeps all your data on your computer.
 
 ## Install (no programming needed)
 
+Takes about 2 minutes. You don't need Python or an administrator password. Your library and documents stay on your
+computer (Windows: `%LOCALAPPDATA%\AFRA\data`, Mac: `~/AFRA/data`); installing again, updating or uninstalling never
+deletes them.
+
 ### Windows
-1. Unzip `AFRA.zip` into a folder you'll keep, for example `Documents\AFRA`.
-2. Double-click **`start.bat`**.
-   - If Python isn't installed yet, the download page opens for you. Install it and **tick "Add python.exe to
-     PATH"** on the first screen, then double-click `start.bat` again.
-3. The first start takes about a minute. After that, AFRA opens in your browser, and a
-   **"AFRA" shortcut** appears on your Desktop for next time.
+**Easiest:** download [`Install A.F.R.A (Windows).cmd`](https://farmansyah.github.io/afra/Install%20A.F.R.A%20(Windows).cmd)
+and double-click it (if Windows asks, choose *More info*, then *Run anyway*).
+
+**Or** open **PowerShell** (Start menu, type *PowerShell*), paste this line and press Enter:
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://farmansyah.github.io/afra/install.ps1 | iex"
+```
+You will see a few short progress lines and then *Done*; A.F.R.A opens in your browser. Next time open **A.F.R.A** from the
+Start menu or the Desktop icon. It runs quietly in the background and starts with Windows, so there is no window to keep
+open. If you used A.F.R.A from an unzipped folder before, your library is copied over. Running the line again repairs or
+updates it.
+
+Remove it (your data stays):
+```powershell
+powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://farmansyah.github.io/afra/install.ps1))) -Uninstall"
+```
+Prefer a manual setup? Unzip `AFRA.zip` and double-click `start.bat` (needs Python 3.10+ with *Add python.exe to PATH*).
 
 ### Mac
-1. Open **Terminal** (⌘ Space, type *Terminal*, Return).
+1. Open **Terminal** (Cmd Space, type *Terminal*, Return).
 2. Paste this line and press Return:
    ```bash
    curl -fsSL https://farmansyah.github.io/afra/install.sh | bash
    ```
-3. That's all. A.F.R.A opens in your browser and appears in your Dock and Applications. It runs quietly in the
-   background, starts with your Mac, and nothing needs approving under *Privacy & Security*. If you used A.F.R.A from
-   an unzipped folder before, your library is copied over. Running the line again repairs or reinstalls; add
-   `-s -- --uninstall` after `bash` to remove it (your data in `~/AFRA/data` stays).
+3. Wait about 2 minutes. A.F.R.A opens in your browser and appears in your Dock and Applications. It runs quietly in
+   the background, starts with your Mac, and nothing needs approving under *Privacy & Security*. (A downloaded
+   double-click file would be blocked by macOS, which is why Macs use this one Terminal line.) If you used A.F.R.A from
+   an unzipped folder before, your library is copied over. Running the line again repairs or reinstalls.
 
-> On Windows, keep the small black window open while you work (closing it stops the app; your work is already
-> saved).
->
-> **Updates** install themselves while you're not working (Settings → Updates can switch this off). On Windows a yellow
-> *Update available* button appears in the sidebar as well.
+Remove it (your data stays): add `-s -- --uninstall` after `bash`.
+
+> **Updates** install themselves while you're not working (Settings -> Updates can switch this off).
 
 ### Use it with your Claude Pro plan (no API key)
 With the [Claude desktop app](https://claude.ai/download), Claude does the thinking and writing on your Claude
 Pro/Max plan, and A.F.R.A gives it real papers, your library, your documents and the Word export.
-1. In A.F.R.A open **Settings → Connect to Claude** (the Mac installer does this already), then quit and reopen Claude.
+1. In A.F.R.A open **Settings → Connect to Claude** (the installers do this already), then quit and reopen Claude.
 2. In Claude, click **+ → Connectors → afra** (make sure it is switched on) and pick a workflow: *Coursework / Tugas*, *Literature review*, *Find evidence*,
    *Write a paper*, *Review my draft* or *Make slides*. Or just ask, e.g. "find 10 Q1 papers on monetite cement and add them to my
    library", "write my assignment from document X, APA, 1500 words, then export it to Word".
@@ -212,6 +225,10 @@ python tools/package.py       # builds dist/AFRA.zip (keeps the Mac launcher exe
 - **Claude connector:** `app/mcp_server.py` is a dependency-free MCP server (stdio) that Claude Desktop starts; it
   forwards tool calls to the running server and starts it if needed. `app/claude_connect.py` registers it in
   `claude_desktop_config.json`.
+- **Windows install:** `docs/install.ps1` (served by GitHub Pages; also run by `Install A.F.R.A (Windows).cmd`) installs to
+  `%LOCALAPPDATA%\AFRA`, uses a Python 3.10+ it finds or a private one via uv, runs the server from a per-user Scheduled
+  Task "A.F.R.A" (logon trigger, restart on failure; Startup-folder shortcut as fallback) and adds Start menu/Desktop
+  shortcuts (`open-afra.vbs`, no console window). Test switches: `-Dir -Port -ZipPath -NoTask -NoShortcuts -NoClaude`.
 - **Mac install:** `docs/install.sh` (served by GitHub Pages) installs to `~/AFRA`, runs the server as a LaunchAgent
   (`AFRA_SUPERVISED=1`, so updates restart through launchd) and builds the Dock app with `osacompile`.
 - **Shared library:** `app/sync.py`. SQLite triggers log every change; each record is written as
