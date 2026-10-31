@@ -253,6 +253,13 @@ A.F.R.A, its name, logo, design and source code are the work of danafarmansyah. 
 
 ## Video summary on a server
 On your own computer, **Video summary** works as it is. A server on a cloud network (a VPS) is often blocked by YouTube
-("prove it isn't a robot"). If you accept the risk to your account, put a browser cookie file at `data/youtube-cookies.txt`
+("prove it isn't a robot"). Three ways around it, in the order A.F.R.A tries them:
+
+1. **The PC relay (recommended).** In **Settings › Video relay** make a shared secret on the server and type the same secret, plus the
+   server's address, on your PC. While A.F.R.A runs on your PC, the server asks it to fetch the captions and the video and your PC sends
+   them up (your PC calls out, so no router setting is needed). If the PC is off, asleep or blocked too, the page says so.
+2. **By hand.** A source that could not be fetched shows **Do it by hand**: open the video on YouTube in your own browser, press
+   *…more › Show transcript*, copy it and paste it. You get the notes without screenshots.
+3. **A cookie file.** If you accept the risk to your account, put a browser cookie file at `data/youtube-cookies.txt`
 (Netscape `cookies.txt` format, exported with a cookies.txt browser extension while signed in to YouTube). A.F.R.A only uses it
 when the file exists. Use a spare Google account, not your main one: YouTube can flag accounts used from a datacenter.

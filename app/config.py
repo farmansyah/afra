@@ -79,6 +79,8 @@ DEFAULTS = {
     "downloads_dir": "",               # folder to watch; empty = the user's Downloads folder
     "downloads_action": "move",        # move | copy into the Designs folder
     "template_vision_model": "",       # reads template previews when a link has no free .pptx; empty = recommended (needs an OpenRouter key)
+    "relay_url": "",                   # on a PC: the server A.F.R.A fetches YouTube for (https://afra.farmansyah.cloud); empty = off
+    "relay_token": "",                 # the shared secret of the PC relay (the same on the server and on the PC)
     "ui_logo": "classic",              # classic | soft | editorial (logo + heading typeface)
     "ui_logo_chosen": False,           # True once the user picks a logo; otherwise the default applies                # navy | dark | forest | plum | paper | ocean | auto
 }

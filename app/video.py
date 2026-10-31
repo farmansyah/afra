@@ -37,7 +37,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, handoff, tugas
+from . import db, handoff, relay, tugas
 from . import google_api as g
 from .config import DATA_DIR, get_settings, replace_file
 
@@ -233,6 +233,13 @@ NO_CAPTIONS = ("This video has no captions A.F.R.A can read. Video summary needs
                "Pick a video with captions turned on (the CC button in YouTube).")
 
 
+BLOCKED = "YouTube is asking this connection to prove it isn't a robot"
+
+
+def is_blocked(msg: str) -> bool:
+    return str(msg).startswith(BLOCKED)
+
+
 def friendly_error(msg: str) -> str:
     low = (msg or "").lower()
     if "private video" in low:
@@ -242,7 +249,7 @@ def friendly_error(msg: str) -> str:
     if "age" in low and ("confirm" in low or "restricted" in low or "inappropriate" in low):
         return "This video is age-restricted. A.F.R.A doesn't sign in to YouTube, so it can't read it."
     if "not a bot" in low or "sign in to confirm" in low or "http error 429" in low or "too many requests" in low:
-        return ("YouTube is asking this connection to prove it isn't a robot, so it blocked A.F.R.A. Try again later or from another network."
+        return (BLOCKED + ", so it blocked A.F.R.A. Try again later or from another network."
                 + ("" if COOKIES.is_file() else f" On a server you can also put a browser cookie file at {COOKIES} (see the README)."))
     if "unavailable" in low or "removed" in low or "does not exist" in low or "terminated" in low:
         return "This video isn't available (removed, blocked in your country, or the link is wrong)."
@@ -320,6 +327,20 @@ def _fetch_subs(video_id: str, lang: str, kind: str, folder: Path) -> Path | Non
 
 
 def get_captions(video_id: str, step=lambda s: None) -> dict:
+    """local_captions, and when YouTube blocks this connection and the owner's PC is set up as a relay, the PC fetches them instead."""
+    try:
+        return local_captions(video_id, step)
+    except ValueError as e:
+        if not (is_blocked(str(e)) and relay.enabled()):
+            raise
+        step("YouTube blocked this server. Trying through your PC…")
+        try:
+            return relay.ask("captions", video_id, step=step)
+        except ValueError as r:
+            raise ValueError(f"{e} Your PC couldn't help: {r}")
+
+
+def local_captions(video_id: str, step=lambda s: None) -> dict:
     """{"meta": {...}, "lang", "kind", "segments"}; ValueError with a plain message when the video can't be read."""
     step("Getting the video details…")
     info = _extract_info(video_id)
@@ -346,6 +367,63 @@ def get_captions(video_id: str, step=lambda s: None) -> dict:
     if not meta["duration"]:
         meta["duration"] = int(segs[-1][0]) + 5
     return {"meta": meta, "lang": lang, "kind": kind, "segments": segs}
+
+
+# ---------------------------------------------------------------- a transcript the person pastes (when nothing can fetch the video)
+TS_LINE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2}):(\d{2})(?:\s+(.*))?$")
+NOT_TRANSCRIPT = ("That doesn't look like a transcript. On YouTube press “…more” under the video, then “Show transcript”, "
+                  "select all of it, copy, and paste it here (a .vtt or .srt file's text works too).")
+
+
+def parse_pasted(text: str) -> list[list]:
+    """A transcript copied from YouTube's "Show transcript" panel (0:12 then the words), or WebVTT/SRT text -> [[seconds, text], ...]."""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if "-->" in text:
+        return parse_vtt(re.sub(r"(\d),(\d{3})", r"\1.\2", text))
+    segs: list[list] = []
+    cur = None
+    for line in text.split("\n"):
+        m = TS_LINE.match(line)
+        if m:
+            cur = [int(m.group(1) or 0) * 3600 + int(m.group(2)) * 60 + int(m.group(3)), (m.group(4) or "").strip()]
+            segs.append(cur)
+        elif line.strip():
+            if cur is None:
+                cur = [0, ""]
+                segs.append(cur)
+            cur[1] = (cur[1] + " " + line.strip()).strip()
+    return [s for s in segs if s[1]]
+
+
+def oembed(video_id: str) -> tuple[str, str]:
+    """(title, channel) from YouTube's public oEmbed, which a blocked server is usually still allowed to ask; ("", "") when it can't."""
+    try:
+        import httpx
+        r = httpx.get("https://www.youtube.com/oembed", params={"url": "https://www.youtube.com/watch?v=" + video_id, "format": "json"}, timeout=6)
+        j = r.json() if r.status_code == 200 else {}
+        return str(j.get("title") or "")[:200], str(j.get("author_name") or "")[:120]
+    except Exception:
+        return "", ""
+
+
+def add_transcript(vid: str, mid: str, text: str) -> dict:
+    """Use a transcript the person pasted for a video that could not be fetched."""
+    segs = parse_pasted(text)
+    if len(" ".join(x[1] for x in segs)) < 40:
+        raise ValueError(NOT_TRANSCRIPT)
+    with _LOCK:
+        st = load(vid)
+        m = mat(st, mid)
+        if not m or m["kind"] != "video":
+            raise ValueError("That source isn't a video.")
+        title, channel = oembed(m["video_id"])
+        last = max(x[0] for x in segs)
+        m.update(status="ok", segments=segs, label=title or m["label"], manual=True,
+                 meta={"title": title or m["label"], "channel": channel, "duration": int(last) + 5 if last else 0, "language": "", "url": m["url"]},
+                 note="Transcript pasted by you" + ("" if last else " (it has no times, so the notes can't link to moments)"))
+        st.update(step="input", error="")
+        save(st)
+        return public(st)
 
 
 # ---------------------------------------------------------------- ffmpeg
@@ -424,6 +502,20 @@ def find_video(folder: Path) -> Path | None:
 
 
 def _download(video_id: str, folder: Path, step=lambda s: None) -> Path:
+    """local_download, and when YouTube blocks this connection and the owner's PC is set up as a relay, the PC downloads it and sends it up."""
+    try:
+        return local_download(video_id, folder, step)
+    except ValueError as e:
+        if not (is_blocked(str(e)) and relay.enabled()):
+            raise
+        step("YouTube blocked this server. Trying through your PC…")
+        try:
+            return relay.ask("video", video_id, folder, step)
+        except ValueError as r:
+            raise ValueError(f"{e} Your PC couldn't help: {r}")
+
+
+def local_download(video_id: str, folder: Path, step=lambda s: None) -> Path:
     """The video without sound, 720p at most, into folder/video.<ext>."""
     folder.mkdir(parents=True, exist_ok=True)
     started = time.time()

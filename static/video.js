@@ -103,11 +103,27 @@ function vdHead(st, sub) {
   return `<div class="page-head"><div><h1>${esc(st.meta ? st.meta.title : "Video summary")}</h1><p>${sub || ""}</p></div><div class="row"><a class="btn small ghost" href="#video">All video summaries</a></div></div>`;
 }
 
+// A video no server or PC could fetch: open it on YouTube in your own browser, copy its transcript, paste it here.
+function vdManual(m) {
+  return `<details class="vd-manual" data-m="${m.id}" style="margin-top:6px"><summary><b>Do it by hand</b>: open the video yourself and paste its transcript</summary>
+    <div class="small" style="margin:6px 0"><a class="btn small primary" target="_blank" rel="noopener" href="${esc(m.url)}">Open the video on YouTube</a>
+      Under the video press <b>…more</b>, then <b>Show transcript</b>, select all the lines, copy, and paste them below. (You'll get the notes without screenshots.)</div>
+    <textarea class="vman" rows="5" placeholder="0:00&#10;Welcome to the lecture…&#10;0:12&#10;Today we cover…"></textarea>
+    <div class="row" style="margin-top:6px"><button class="btn small primary" data-vman="${m.id}">Use this transcript</button></div></details>`;
+}
+function vdBindManual(id) {
+  $$("[data-vman]").forEach((b) => b.onclick = (e) => busy(e.currentTarget, async () => {
+    const text = $(".vman", b.closest(".vd-manual")).value;
+    await api(`/api/video/${id}/transcript`, { body: { m: b.dataset.vman, text } });
+    await vdRun(id); vdProgress();
+  }));
+}
+
 function vdRows(st) {
   return `<div class="card"><h3>Sources</h3>${st.materials.map((m) => `<div class="row small" style="align-items:flex-start;gap:8px;margin:5px 0">
     <span class="pill ${m.status === "ok" ? "ok" : m.status === "failed" ? "bad" : "gray"}">${m.status === "ok" ? "Read" : m.status === "failed" ? "Failed" : "Waiting"}</span>
     <div class="grow"><b>${esc(m.meta && m.meta.title || m.label)}</b>${m.kind === "doc" ? " (document)" : m.meta && m.meta.channel ? ` · ${esc(m.meta.channel)}` : ""}
-      <div class="muted">${esc(m.note || "")}${m.frames_note ? " · " + esc(m.frames_note) : ""}</div></div></div>`).join("")}
+      <div class="muted">${esc(m.note || "")}${m.frames_note ? " · " + esc(m.frames_note) : ""}</div>${m.status === "failed" && m.kind === "video" ? vdManual(m) : ""}</div></div>`).join("")}
     ${(st.problems || []).length ? `<div class="small muted" style="margin-top:6px">Skipped: ${st.problems.map(esc).join("; ")}</div>` : ""}</div>`;
 }
 
@@ -120,6 +136,7 @@ async function vdProgress() {
         : j ? `<div class="statusbar"><span class="spin"></span> ${esc(j.step)}</div>` : `<div class="row"><div class="grow small muted">${st.error ? esc(st.error) : "This summary isn't finished."}</div><button class="btn primary" id="vresume">Resume</button></div>`}
         ${j && j.state === "working" && VD.claude ? `<div class="small muted" style="margin-top:8px">Claude is doing the writing steps. Claude opened with the request filled in: press <b>Enter</b> there. <a class="btn small" href="${esc(VD.claude.url)}">Open Claude</a></div>` : ""}</div>` + vdRows(st) + sibs;
     const r = $("#vresume"); if (r) r.onclick = (e) => busy(e.currentTarget, async () => { await vdRun(id); vdProgress(); });
+    vdBindManual(id);
   };
   for (; ;) {
     let st, j = null;

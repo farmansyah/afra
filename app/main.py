@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
 from . import cheatsheet, sources
-from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, video, watcher, wizard
+from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, relay, slidesgo, template_import, tugas, tugas_decks, video, watcher, wizard
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -94,6 +94,7 @@ async def _downloads_loop():
 async def _startup():
     asyncio.create_task(_downloads_loop())
     asyncio.create_task(asyncio.to_thread(video.sweep))  # videos left in the cache by an earlier run
+    relay.start_worker()  # does nothing until relay_url and relay_token are set
     asyncio.create_task(_sync_loop())
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_file_sync_loop())
@@ -1800,6 +1801,67 @@ async def video_save(vid: str, body: dict):
 @app.post("/api/video/{vid}/google-doc")
 async def video_google_doc(vid: str, body: dict):
     return await asyncio.to_thread(video.export_google_doc, vid, body.get("account") or None)
+
+
+@app.post("/api/video/{vid}/transcript")
+async def video_transcript(vid: str, body: dict):
+    """A transcript the person pasted for a video that could not be fetched."""
+    return await asyncio.to_thread(video.add_transcript, vid, body.get("m", ""), body.get("text", ""))
+
+
+# ---- PC relay: a server YouTube blocks borrows the owner's PC (app/relay.py). The PC calls these; they need the shared token.
+def _relay_auth(request: Request):
+    if not relay.token_ok(request.headers.get("x-relay-token")):
+        raise HTTPException(403, "Wrong or missing relay token.")
+
+
+@app.get("/api/relay/status")
+def relay_status():
+    return {**relay.status(), "worker": relay.worker_status()}
+
+
+@app.get("/api/relay/next")
+async def relay_next(request: Request, wait: int = 20):
+    _relay_auth(request)
+    end = time.time() + max(0, min(wait, 25))
+    while True:
+        relay.seen()
+        job = relay.claim()
+        if job or time.time() >= end:
+            return job or {}
+        await asyncio.sleep(1)
+
+
+@app.post("/api/relay/{rid}/progress")
+def relay_progress(rid: str, body: dict, request: Request):
+    _relay_auth(request)
+    relay.progress(rid, body.get("step", ""))
+    return {"ok": True}
+
+
+@app.post("/api/relay/{rid}/result")
+def relay_result(rid: str, body: dict, request: Request):
+    _relay_auth(request)
+    relay.finish(rid, body.get("data"), body.get("error", ""))
+    return {"ok": True}
+
+
+@app.put("/api/relay/{rid}/file")
+async def relay_file(rid: str, request: Request, ext: str = "mp4"):
+    _relay_auth(request)
+    path = relay.receive_path(rid, ext)
+    size = 0
+    with open(path, "wb") as fh:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > relay.MAX_BYTES:
+                fh.close()
+                path.unlink(missing_ok=True)
+                relay.finish(rid, error="The video is too large to send.")
+                raise HTTPException(413, "Too large.")
+            await asyncio.to_thread(fh.write, chunk)
+    relay.finish(rid, data={"size": size})
+    return {"ok": True, "size": size}
 
 
 @app.post("/api/video/{vid}/document")
