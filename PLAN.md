@@ -198,3 +198,9 @@ Paste YouTube links (one per line, up to 10 sources with A.F.R.A documents or up
 - **Smoke-tested** in the browser on port 8801 with a temporary data folder: picker, Tugas selection, cheatsheet flow through the Claude hand-off (the answers were typed in by hand through the hand-off endpoint), review edits, Word and PDF saved in a Tugas folder, and a multi-source deck draft with the source tag on the wireframe.
 - **Not verified:** real AI output, the Google Doc upload against Google, opening the .docx in real Word (column layout and how it paginates), printing the PDF.
 
+
+### Pending: A.F.R.A on the VPS (afra.farmansyah.cloud), deployed 2026-10-31
+- **Now:** Dana and Raina share one A.F.R.A at https://afra.farmansyah.cloud, deliberately with **no login** (their choice, with the risk explained: it holds the OpenRouter/DeepSeek keys and the Google sign-in). systemd `afra-research` (MemoryHigh 600M / MemoryMax 900M) on 127.0.0.1:8778, Caddy site `/etc/caddy/sites/afra.caddy` (reload, never restart). Code in `~/afra` (git clone of github.com/farmansyah/afra), data in `~/afra/data` (a full copy of the PC library made 2026-10-31, without the browser profile and backups). Update with `~/afra-update.sh` (backs up the DB, pulls, installs, restarts only afra-research).
+- **Next (asked):** personalise per user, using the existing user database of the AFRA chat (afra-chat), so each person has their own projects, settings and keys. Then a login can ride on the same accounts. Until then anyone with the URL has full access.
+- **Known:** YouTube blocks Video summary from the VPS ("prove it isn't a robot"). Options: a `data/youtube-cookies.txt` (see README, risk to the account) or a relay through the PC that fetches captions and frames and sends only the results.
+- The PC copy (afra.com) is the private offline copy; the two libraries are not synced (sync between them is not planned yet).
