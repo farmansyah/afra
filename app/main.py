@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
-from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, watcher, wizard
+from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, video, watcher, wizard
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
 from .docx_export import TEMPLATES, build_docx
@@ -92,6 +92,7 @@ async def _downloads_loop():
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(_downloads_loop())
+    asyncio.create_task(asyncio.to_thread(video.sweep))  # videos left in the cache by an earlier run
     asyncio.create_task(_sync_loop())
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_file_sync_loop())
@@ -1624,6 +1625,100 @@ def wizard_review(wid: str):
 @app.post("/api/wizard/{wid}/create")
 def wizard_create(wid: str):
     return wizard.start_create(wid)
+
+
+# ---------------------------------------------------------------- Video summary
+@app.get("/api/video")
+def video_list():
+    return video.listing()
+
+
+@app.post("/api/video")
+async def video_new(request: Request):
+    """JSON {url_text, doc_ids, project_id, options, mode}, or multipart (field "data" = that JSON, plus files) when documents are uploaded."""
+    uploads = []
+    if "multipart" in request.headers.get("content-type", ""):
+        form = await request.form()
+        body = json.loads(form.get("data") or "{}")
+        uploads = [(f.filename, await f.read()) for f in form.getlist("files") if hasattr(f, "filename")]
+    else:
+        body = await request.json()
+    drafts = await asyncio.to_thread(video.new, body, uploads)
+    return {"drafts": [video.public(d) for d in drafts]}
+
+
+@app.get("/api/video/jobs/{jid}")
+def video_job(jid: str):
+    return video.job(jid)
+
+
+@app.get("/api/video/{vid}")
+def video_get(vid: str):
+    video.sweep()
+    return video.public(video.load(vid))
+
+
+@app.put("/api/video/{vid}")
+def video_put(vid: str, body: dict):
+    return video.public(video.patch(vid, body))
+
+
+@app.delete("/api/video/{vid}")
+def video_delete(vid: str):
+    video.delete(vid)
+    return {"ok": True}
+
+
+@app.post("/api/video/{vid}/start")
+async def video_start(vid: str, body: dict):
+    """Run or resume the job. redo: summary | frames | video | all. batch: other drafts (separate resumes) to run after this one."""
+    return video.start(vid, handoff.CURRENT.get(), body.get("redo", ""), body.get("batch") or [])
+
+
+@app.post("/api/video/{vid}/answers")
+def video_answers(vid: str, body: dict):
+    return video.public(video.answer(vid, body.get("answers") or {}))
+
+
+@app.post("/api/video/{vid}/rewrite")
+async def video_rewrite(vid: str, body: dict):
+    return await video.rewrite_section(vid, body.get("section", ""), body.get("instruction", ""))
+
+
+@app.post("/api/video/{vid}/frame")
+async def video_frame_pick(vid: str, body: dict):
+    return await asyncio.to_thread(video.pick_frame, vid, body.get("section", ""), body.get("t", 0), body.get("replace", ""), body.get("m", ""))
+
+
+@app.get("/api/video/{vid}/frame/{fid}.jpg")
+def video_frame(vid: str, fid: str):
+    return FileResponse(video.frame_path(vid, fid), media_type="image/jpeg")
+
+
+@app.get("/api/video/{vid}/export")
+async def video_export(vid: str, fmt: str = "docx"):
+    data, name, mime = await asyncio.to_thread(video.export_file, vid, fmt)
+    return _attach(data, name, mime)
+
+
+@app.post("/api/video/{vid}/save")
+async def video_save(vid: str, body: dict):
+    return await asyncio.to_thread(video.save_to_tugas, vid, body.get("folder", ""), body.get("format", "docx"))
+
+
+@app.post("/api/video/{vid}/google-doc")
+async def video_google_doc(vid: str, body: dict):
+    return await asyncio.to_thread(video.export_google_doc, vid, body.get("account") or None)
+
+
+@app.post("/api/video/{vid}/document")
+def video_document(vid: str):
+    return video.save_document(vid)
+
+
+@app.post("/api/video/{vid}/finish")
+def video_finish(vid: str):
+    return video.finish(vid)
 
 
 # ---------------------------------------------------------------- frontend
