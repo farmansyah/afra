@@ -2662,14 +2662,17 @@ async function tgLink(path) {
   };
 }
 const tgIsPptx = (it) => it && it.kind === "file" && it.ext === "pptx";
-function tgSelBar() {  // one selected .pptx: the things to do with it
+const TG_READABLE = new Set(["pptx", "pdf", "docx", "md", "markdown", "txt"]);
+const tgRefs = (items) => items.filter((i) => i.kind === "folder" || TG_READABLE.has(i.ext)).map((i) => ({ type: i.kind === "folder" ? "folder" : "file", path: i.path }));
+function tgSelBar() {  // what to do with the selection: one .pptx (open, Slides, design), and for any files/folders a deck or cheatsheet from them
   const bar = $("#tgselbar"); if (!bar) return;
-  const it = T.sel.size === 1 ? T.data.items.find((i) => i.path === [...T.sel][0]) : null;
-  if (!tgIsPptx(it)) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
+  const sel = [...T.sel].map((p) => T.data.items.find((i) => i.path === p)).filter(Boolean), it = sel.length === 1 ? sel[0] : null, refs = tgRefs(sel);
+  if (!sel.length) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
   bar.classList.remove("hidden");
-  bar.innerHTML = `<span class="small"><b>${esc(it.name)}</b></span><button class="btn small" data-sb="open">Open in PowerPoint</button>
-    <button class="btn small" data-sb="gslides">Open in Google Slides</button><button class="btn small" data-sb="design">Use as design</button>`;
-  $$("[data-sb]", bar).forEach((b) => b.onclick = () => busy(b, () => ({ open: () => tgOpen(it), gslides: () => tgGoogle(it), design: () => tgUseDesign(it) })[b.dataset.sb]()));
+  bar.innerHTML = `<span class="small"><b>${it ? esc(it.name) : sel.length + " selected"}</b></span>${tgIsPptx(it) ? `<button class="btn small" data-sb="open">Open in PowerPoint</button>
+    <button class="btn small" data-sb="gslides">Open in Google Slides</button><button class="btn small" data-sb="design">Use as design</button>` : ""}
+    ${refs.length ? `<button class="btn small" data-sb="cheat" title="One dense printable sheet from the selected files and folders">Make cheatsheet</button><button class="btn small" data-sb="deck" title="A deck written from the selected files and folders together">New deck from selected</button>` : ""}`;
+  $$("[data-sb]", bar).forEach((b) => b.onclick = () => busy(b, () => ({ open: () => tgOpen(it), gslides: () => tgGoogle(it), design: () => tgUseDesign(it), cheat: () => csBegin(refs, [], T.path), deck: () => openWizardIn(T.path, refs) })[b.dataset.sb]()));
 }
 async function tgGoogle(it) {
   try {
@@ -2698,8 +2701,8 @@ function tgContext(e) {
   const sel = tgSelected(), one = el && sel.length === 1 ? T.data.items.find((i) => i.path === sel[0]) : null;
   let list;
   if (!el) list = [["mkdir", "New folder"], ["upload", "Upload files…"], ...(T.path ? [["newdeck", "New deck…"]] : []), ["-"], ["reveal", "Show this folder in File Explorer"]];
-  else if (!one) list = [["trash", "Move to Recycle Bin", "danger"]];
-  else list = [["open", tgIsPptx(one) ? "Open in PowerPoint" : "Open"], ...(tgIsPptx(one) ? [["gslides", "Open in Google Slides"], ["design", "Use as design"]] : []), ["reveal", "Show in File Explorer"], ["rename", "Rename"], ...(one.kind === "folder" ? [["-"], ["meta", "Set due date / note"], ["link", "Link A.F.R.A document or paper"]] : []), ["-"], ["trash", "Move to Recycle Bin", "danger"]];
+  else if (!one) list = [...(tgRefs(sel.map((p) => T.data.items.find((i) => i.path === p)).filter(Boolean)).length ? [["cheat", "Make cheatsheet…"], ["deck", "New deck from selected…"], ["-"]] : []), ["trash", "Move to Recycle Bin", "danger"]];
+  else list = [["open", tgIsPptx(one) ? "Open in PowerPoint" : "Open"], ...(tgIsPptx(one) ? [["gslides", "Open in Google Slides"], ["design", "Use as design"]] : []), ...(tgRefs([one]).length ? [["cheat", "Make cheatsheet…"], ["deck", "New deck from this…"]] : []), ["reveal", "Show in File Explorer"], ["rename", "Rename"], ...(one.kind === "folder" ? [["-"], ["meta", "Set due date / note"], ["link", "Link A.F.R.A document or paper"]] : []), ["-"], ["trash", "Move to Recycle Bin", "danger"]];
   $$(".tg-menu").forEach((m) => m.remove());
   const m = document.createElement("div"); m.className = "tg-menu";
   m.innerHTML = list.map(([k, label, cls]) => k === "-" ? "<hr>" : `<button data-k="${k}" class="${cls || ""}">${label}</button>`).join("");
@@ -2708,6 +2711,7 @@ function tgContext(e) {
   m.onclick = (ev) => {
     const k = ev.target.dataset.k; if (!k) return; m.remove();
     if (k === "mkdir") tgNew(); else if (k === "upload") $("#tgfile").click(); else if (k === "newdeck") tgNewDeck();
+    else if (k === "cheat" || k === "deck") { const r = tgRefs(sel.map((p) => T.data.items.find((i) => i.path === p)).filter(Boolean)); if (k === "cheat") csBegin(r, [], T.path); else openWizardIn(T.path, r); }
     else if (k === "gslides") tgGoogle(one); else if (k === "design") tgUseDesign(one).catch((x) => toast(x.message, "bad"));
     else if (k === "reveal") api("/api/tugas/reveal", { body: { path: one ? one.path : T.path } }).catch((x) => toast(x.message, "bad"));
     else if (k === "open") tgOpen(one); else if (k === "rename") tgRename(one.path);

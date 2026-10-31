@@ -11,7 +11,7 @@ const cwLayoutOpts = (cur) => Object.entries(CW_LAYOUT).map(([k, v]) => `<option
 function startWizard(body) {  // body: {mode: "doc"|"paper"|"blank"|"topic"|"upload", doc_id?, paper_id?, title?, folder?}
   return api("/api/wizard", { body: { project_id: S.project.id, ...body } }).then((st) => { location.hash = "#create/" + st.id; }).catch((e) => toast(e.message, "bad"));
 }
-function openWizardIn(folder) { CW.preset = { folder }; location.hash = "#create"; }
+function openWizardIn(folder, sources) { CW.preset = { folder, sources: sources || [] }; location.hash = "#create"; }
 
 VIEWS.create = async () => {
   CW.poll++;  // stops the pollers of an earlier visit
@@ -21,7 +21,7 @@ VIEWS.create = async () => {
 
 // ---- the start page: pick a way in, or continue a draft
 async function cwStart() {
-  const [drafts, docs, papers] = await Promise.all([api("/api/wizard"), api(`/api/projects/${S.project.id}/documents?kind=doc`).catch(() => []), api(`/api/projects/${S.project.id}/papers`).catch(() => [])]);
+  const drafts = await api("/api/wizard");
   const pre = CW.preset;
   main().innerHTML = `<div class="page-head"><div><h1>Create into PPT</h1><p>One path for every deck: the content, a design, a plain mockup you check, then the real slides. Nothing is built until you have reviewed the mockup.</p></div></div>
     ${needLLM()}
@@ -35,20 +35,25 @@ async function cwStart() {
         <div class="row" style="margin-top:8px"><button class="btn primary" id="cwgo1">Research and write the essay</button></div></div>
       <div class="card" style="margin:0"><h3>Upload documents</h3><p class="small muted" style="margin-top:0">Essays, reports, papers: .txt, .md, .docx, .pdf or a Google Doc. The AI reads them and proposes what goes on the slides.</p>
         <div class="row"><button class="btn primary" id="cwgo2">Start with my documents</button></div></div>
-      <div class="card" style="margin:0"><h3>From a document or reading</h3><p class="small muted" style="margin-top:0">One of your A.F.R.A documents or a paper in the library.</p>
-        <select id="cwsrc"><option value="">Pick one…</option>${docs.length ? `<optgroup label="Documents">${docs.map((d) => `<option value="doc:${esc(d.id)}">${esc(d.title)}</option>`).join("")}</optgroup>` : ""}
-          ${papers.length ? `<optgroup label="Library papers">${papers.map((p) => `<option value="paper:${esc(p.id)}">${esc(p.title || "Untitled")}</option>`).join("")}</optgroup>` : ""}</select>
-        <div class="row" style="margin-top:8px"><button class="btn primary" id="cwgo3">Make slides from it</button></div></div>
+      <div class="card" style="margin:0;grid-column:1/-1"><h3>From one or several sources</h3><p class="small muted" style="margin-top:0">Mix A.F.R.A documents, library papers, uploaded files and files or whole folders from Tugas (lecture slides, PDF, Word, notes). The AI reads them together and every slide keeps track of its source.</p>
+        <div id="cwsp"></div>
+        <div class="row" style="margin-top:10px"><button class="btn primary" id="cwgo3">Make slides from them</button><button class="btn" id="cwgo5">Make a cheatsheet instead</button></div></div>
       <div class="card" style="margin:0"><h3>Blank deck (quick)</h3><p class="small muted" style="margin-top:0">A title, one content slide and a closing slide in the design you pick; you fill in the text.</p>
         <input type="text" id="cwbt" placeholder="Deck title"><div class="row" style="margin-top:8px"><button class="btn primary" id="cwgo4">Start a blank deck</button></div></div>
     </div>`;
+  const pk = await srcPicker($("#cwsp"), { refs: pre && pre.sources ? pre.sources : [] });
   const begin = (body) => api("/api/wizard", { body: { project_id: S.project.id, ...(pre ? { folder: pre.folder } : {}), ...body } }).then((st) => { CW.preset = null; location.hash = "#create/" + st.id; });
   const nof = $("#cwnof"); if (nof) nof.onclick = () => { CW.preset = null; };
   $("#cwgo1").onclick = (e) => busy(e.currentTarget, () => { if ($("#cwt").value.trim().length < 8) return toast("Write the topic, or a few lines about what the deck should cover"); return begin({ mode: "topic", topic: $("#cwt").value }); });
   $("#cwgo2").onclick = (e) => busy(e.currentTarget, () => begin({ mode: "upload" }));
-  $("#cwgo3").onclick = (e) => busy(e.currentTarget, () => {
-    const [kind, id] = ($("#cwsrc").value || ":").split(":"); if (!id) return toast("Pick a document or a paper first");
-    return begin(kind === "doc" ? { mode: "doc", doc_id: id } : { mode: "paper", paper_id: id });
+  $("#cwgo3").onclick = (e) => busy(e.currentTarget, async () => {
+    if (!pk.refs().length && !pk.files().length) return toast("Pick at least one source, or upload a file");
+    const st = await api("/api/wizard", { body: { project_id: S.project.id, ...(pre ? { folder: pre.folder } : {}), mode: "multi", sources: pk.refs() } });
+    await srcUpload("wizard", st.id, pk.files()); CW.preset = null; location.hash = "#create/" + st.id;
+  });
+  $("#cwgo5").onclick = (e) => busy(e.currentTarget, () => {
+    if (!pk.refs().length && !pk.files().length) return toast("Pick at least one source, or upload a file");
+    return csBegin(pk.refs(), pk.files(), pre ? pre.folder : null);
   });
   $("#cwgo4").onclick = (e) => busy(e.currentTarget, () => begin({ mode: "blank", title: $("#cwbt").value.trim() || "New deck" }));
   $$("[data-dd]").forEach((b) => b.onclick = async () => { if (!confirm("Delete this draft? Decks already built stay where they are.")) return; await api("/api/wizard/" + b.dataset.dd, { method: "DELETE" }); cwStart(); });
@@ -61,7 +66,7 @@ async function cwOpen(id) {
   if (CW.mock && CW.sel >= CW.mock.slides.length) CW.sel = 0;
   cwFrame();
 }
-const cwSourceReady = (st) => st.source.type === "essay" ? st.essay_info.approved : st.source.type === "uploads" ? st.materials.length > 0 : true;
+const cwSourceReady = (st) => st.source.type === "essay" ? st.essay_info.approved : st.source.type === "uploads" ? st.materials.length > 0 : st.source.type === "multi" ? st.source.items.length + st.materials.length > 0 : true;
 const cwCan = (k) => k === "content" || (k === "design" && cwSourceReady(CW.st)) || (k === "mockup" && cwSourceReady(CW.st)) || (k === "review" && !!CW.mock) || (k === "create" && (!!CW.st.result || !!CW.job));
 async function cwPut(body) { CW.st = await api("/api/wizard/" + CW.id, { method: "PUT", body }); return CW.st; }
 async function cwGo(step) { await cwFlush(); if (CW.st.step !== step) await cwPut({ step }); cwFrame(); }
@@ -114,6 +119,7 @@ function cwContent() {
   const wireTitle = () => { const x = $("#cwtitle"); if (x) x.oninput = debounce(() => cwPut({ title: x.value }).catch(() => { }), 500); };
   if (t === "essay") { cwEssayStep(el); return; }
   if (t === "uploads") { cwUploadStep(el); return; }
+  if (t === "multi") { cwMultiStep(el); return; }
   let info = "";
   if (t === "doc") info = `<p>The slides are written from your A.F.R.A document <b>${esc(st.topic)}</b> (and the library papers it cites). <a href="#docs/${esc(st.source.id)}">Open the document</a></p>`;
   else if (t === "paper") info = `<p>The slides are written from the reading <b>${esc(st.topic)}</b>: its abstract, your notes and its full text if you fetched it. It is cited as a library source. <a href="#library">Open the library</a></p>`;
@@ -239,6 +245,26 @@ function cwNeedGoogle(msg) {
   $("#cwx", box).onclick = closeModal; $("#cwok", box).onclick = () => { closeModal(); location.hash = "#settings"; };
 }
 
+// -- several sources: documents, papers, uploaded files and Tugas files or folders, read together
+async function cwMultiStep(el) {
+  const st = CW.st;
+  el.innerHTML = `<div class="card"><h3>Sources</h3><div id="cwsp"></div><label class="f">Deck title <small>(optional: the AI suggests one)</small></label><input type="text" id="cwtitle" value="${esc(st.title === "New deck" ? "" : st.title)}">
+    <div class="small muted" style="margin-top:8px">The AI reads them together${st.source.items.length + st.materials.length > 3 ? "; long sources are summarised one by one first, then merged" : ""}. Each slide records which sources it came from, and the References slide lists them all.</div></div>${cwOptionsHTML(st.options)}`;
+  const nav = () => cwNav({ next: pk && (pk.refs().length || pk.files().length || CW.st.materials.length) ? async () => {
+    await cwMultiSave(pk); await cwGo("design");
+  } : null, label: "Next: design", hint: "Pick at least one source." });
+  let pk = null;
+  pk = await srcPicker($("#cwsp"), { refs: st.source.items, extra: st.materials.map((m) => ({ id: m.id, name: m.name, remove: async () => { await api(`/api/wizard/${CW.id}/materials/${m.id}`, { method: "DELETE" }); CW.st = await api("/api/wizard/" + CW.id); cwMultiStep(el); } })), onChange: () => { nav(); save(); } });
+  const save = debounce(() => cwMultiSave(pk, true).catch((e) => toast(e.message, "bad")), 600);
+  $("#cwtitle").oninput = debounce(() => cwPut({ title: $("#cwtitle").value }).catch(() => { }), 500);
+  cwWireOptions(el); nav();
+}
+async function cwMultiSave(pk, quiet) {
+  const same = JSON.stringify(pk.refs()) === JSON.stringify(CW.st.source.items);
+  if (!same) { CW.st = await api("/api/wizard/" + CW.id, { method: "PUT", body: { sources: pk.refs() } }); CW.mock = null; }
+  if (!quiet && pk.files().length) { const f = pk.files(); pk.clearFiles(); await srcUpload("wizard", CW.id, f); CW.st = await api("/api/wizard/" + CW.id); CW.mock = null; }
+}
+
 // -- uploaded documents
 function cwUploadStep(el) {
   const st = CW.st, a = st.analysis;
@@ -316,7 +342,7 @@ async function cwDesign() {
 // ================================================================== 3 · Mockup (plain wireframes, no design)
 const cwSet = (obj, path, v) => { const k = path.split("."); let o = obj; k.slice(0, -1).forEach((p) => { if (o[p] == null) o[p] = isNaN(+k[k.indexOf(p) + 1]) ? {} : []; o = o[p]; }); o[k[k.length - 1]] = v; };
 const cwLines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
-const cwWF = (s, edit) => `<div class="wf-in">${cwWFin(s, edit)}</div>`;
+const cwWF = (s, edit) => `<div class="wf-in">${cwWFin(s, edit)}${s.source && !["title", "section", "closing"].includes(s.layout) ? `<div class="wf-src" title="${esc(s.source)}">Source: ${esc(s.source)}</div>` : ""}</div>`;
 function cwWFin(s, edit) {
   const ed = (f, one = true) => edit ? ` contenteditable="true" spellcheck="true" data-f="${f}" ${one ? 'data-one="1"' : ""}` : "";
   const T = (text, f, cls, ph) => `<div class="wf-t ${cls}"${ed(f)} data-ph="${esc(ph)}">${esc(text || "")}</div>`;

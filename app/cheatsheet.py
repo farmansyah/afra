@@ -143,6 +143,8 @@ def patch(cid: str, body: dict) -> dict:
                 o[k] = None if n[k] is None else str(n[k])
     if body.get("step") in STEPS:
         st["step"] = body["step"]
+        if st["step"] != "make":
+            st["result"] = None  # going back to change something: the Make page offers the files again
     return save(st)
 
 
