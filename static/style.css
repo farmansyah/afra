@@ -400,3 +400,12 @@ body:not(.chat-open) #toasts { bottom: 84px; }
   body.chat-open #chatFab { display: none; }
   body.chat-open #toasts { right: 18px; }
 }
+
+/* Video summary */
+.vd-shots { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.vd-shot { width: min(100%, 360px); }
+.vd-shot img { width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; background: var(--subtle); aspect-ratio: 16/9; object-fit: cover; }
+.vd-shot.off img { opacity: .3; filter: grayscale(1); }
+.vd-scrub { margin-top: 10px; padding: 10px 12px; background: var(--subtle); border-radius: 8px; display: flex; flex-direction: column; gap: 8px; }
+.vd-scrub.hidden { display: none; }
+#vmode.hidden, #veveryw.hidden { display: none; }
