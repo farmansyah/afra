@@ -209,7 +209,7 @@ async function studioPanel(el, ctx = {}) {
 }
 const EXEC = [/^\/api\/tools\/(run|ask-library|suggest-citations)$/, /^\/api\/papers\/[^/]+\/summarize$/,
   /^\/api\/paper\/[^/]+\/(style-guide|literature|outline|review|section\/\d+|abstract)$/, /^\/api\/gaps\/[^/]+\/write$/,
-  /^\/api\/decks\/(outline|content)$/, /^\/api\/decks\/[^/]+\/redo$/, /^\/api\/wizard\/[^/]+\/(analyze|mockup|rewrite|essay\/revise)$/];
+  /^\/api\/decks\/(outline|content)$/, /^\/api\/decks\/[^/]+\/redo$/, /^\/api\/wizard\/[^/]+\/(analyze|mockup|rewrite|essay\/revise)$/, /^\/api\/video\/[^/]+\/rewrite$/];
 function execLabel(path, body = {}) {
   if (path === "/api/tools/run") return S.meta?.tools?.[body.tool] || "Writing tool";
   if (path === "/api/tools/ask-library") return "Ask your library";
@@ -217,6 +217,7 @@ function execLabel(path, body = {}) {
   if (path.endsWith("/summarize")) return "Reading notes";
   if (path.startsWith("/api/gaps/")) return "Gap analysis write-up";
   if (path.startsWith("/api/wizard/")) return "Create into PPT: " + ({ analyze: "read your documents", mockup: "write the mockup", rewrite: "rewrite a slide", revise: "change the essay" }[path.split("/").pop()] || "AI step");
+  if (path.startsWith("/api/video/")) return "Video summary: rewrite a section";
   if (path.startsWith("/api/decks/")) return "Slides: " + (path.endsWith("/outline") ? "outline" : path.endsWith("/content") ? "write the slides" : "rewrite a slide");
   const step = (path.match(/\/api\/paper\/[^/]+\/([a-z-]+)/) || [])[1] || "";
   return "Paper Writer: " + ({ "style-guide": "style guide", literature: "literature synthesis", outline: "outline", review: "reviewer check", section: "section draft", abstract: "title & abstract" }[step] || step);
