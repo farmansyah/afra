@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle, checks, claude_connect, db, handoff, phone, slides, starters, studio, discovery, gaps, integrations, models, quality, research, sync, updater, writer
+from . import cheatsheet, sources
 from . import designs, google_api, greatppt, gslides, pdf_design, pptx_build, slidesgo, template_import, tugas, tugas_decks, video, watcher, wizard
 from .citations import STYLES, bibliography, parse_bibtex, process_citations, to_bibtex, to_ris
 from .config import BASE_DIR, DATA_DIR, get_settings, save_settings
@@ -1625,6 +1626,96 @@ def wizard_review(wid: str):
 @app.post("/api/wizard/{wid}/create")
 def wizard_create(wid: str):
     return wizard.start_create(wid)
+
+
+# ---------------------------------------------------------------- Several sources, and cheatsheets
+@app.get("/api/sources/tugas")
+def sources_tugas():
+    return sources.candidates()
+
+
+@app.get("/api/cheatsheet")
+def cheatsheet_list():
+    return cheatsheet.listing()
+
+
+@app.post("/api/cheatsheet")
+def cheatsheet_new(body: dict):
+    return cheatsheet.public(cheatsheet.new(body))
+
+
+@app.get("/api/cheatsheet/{cid}")
+def cheatsheet_get(cid: str):
+    return cheatsheet.public(cheatsheet.load(cid))
+
+
+@app.put("/api/cheatsheet/{cid}")
+def cheatsheet_put(cid: str, body: dict):
+    return cheatsheet.public(cheatsheet.patch(cid, body))
+
+
+@app.delete("/api/cheatsheet/{cid}")
+def cheatsheet_delete(cid: str):
+    cheatsheet.delete(cid)
+    return {"ok": True}
+
+
+@app.post("/api/cheatsheet/{cid}/materials")
+async def cheatsheet_material(cid: str, file: UploadFile = File(...)):
+    data = await file.read()
+    return await asyncio.to_thread(cheatsheet.add_material, cid, file.filename or "file.txt", data)
+
+
+@app.delete("/api/cheatsheet/{cid}/materials/{mid}")
+def cheatsheet_material_delete(cid: str, mid: str):
+    cheatsheet.remove_material(cid, mid)
+    return {"ok": True}
+
+
+@app.post("/api/cheatsheet/{cid}/questions")
+async def cheatsheet_questions(cid: str):
+    return await cheatsheet.questions(cid)
+
+
+@app.post("/api/cheatsheet/{cid}/answers")
+def cheatsheet_answers(cid: str, body: dict):
+    return cheatsheet.answer(cid, body.get("answers") or {})
+
+
+@app.post("/api/cheatsheet/{cid}/propose")
+async def cheatsheet_propose(cid: str):
+    return await cheatsheet.propose(cid)
+
+
+@app.post("/api/cheatsheet/{cid}/suggest")
+async def cheatsheet_suggest(cid: str, body: dict):
+    return await cheatsheet.suggest(cid, body.get("section", ""), body.get("instruction", ""))
+
+
+@app.put("/api/cheatsheet/{cid}/sections")
+def cheatsheet_sections(cid: str, body: dict):
+    return cheatsheet.save_sections(cid, body.get("sections"), body.get("title"))
+
+
+@app.post("/api/cheatsheet/{cid}/op")
+def cheatsheet_op(cid: str, body: dict):
+    return cheatsheet.edit(cid, body, body.get("sections"))
+
+
+@app.post("/api/cheatsheet/{cid}/make")
+async def cheatsheet_make(cid: str):
+    return await asyncio.to_thread(cheatsheet.make, cid)
+
+
+@app.get("/api/cheatsheet/{cid}/download")
+async def cheatsheet_download(cid: str, fmt: str = "docx"):
+    data, name = await asyncio.to_thread(cheatsheet.render, cheatsheet.load(cid), fmt)
+    return _attach(data, name, "application/pdf" if fmt == "pdf" else google_api.MIME_DOCX)
+
+
+@app.post("/api/cheatsheet/{cid}/google-doc")
+async def cheatsheet_google_doc(cid: str, body: dict):
+    return await asyncio.to_thread(cheatsheet.to_google_doc, cheatsheet.load(cid), body.get("account") or None)
 
 
 # ---------------------------------------------------------------- Video summary

@@ -85,15 +85,10 @@ def public(st: dict) -> dict:
     """What the page gets: the uploaded texts stay on the server (name and size only), plus the fit estimate."""
     out = {k: v for k, v in st.items() if k != "materials"}
     out["materials"] = [{"id": m["id"], "name": m["name"], "chars": len(m["text"])} for m in st.get("materials") or []]
-    out["source_labels"] = [source_label(r) for r in st.get("sources") or []]
+    out["source_labels"] = [sources.label(r) for r in st.get("sources") or []]
     out["estimate"] = estimate(st.get("sections") or [], st["options"])
     out["non_latin"] = not all(simple_pdf.latin_only(t) for t in all_text(st.get("sections") or [], st.get("title", "")))
     return out
-
-
-def source_label(r: dict) -> dict:
-    from .wizard import source_label as label
-    return label(r)
 
 
 def new(body: dict) -> dict:
@@ -331,7 +326,7 @@ def geometry(o: dict) -> dict:
     colw = (PAGE[0] - 2 * MARGIN - GAP * (cols - 1)) / cols
     per_col = (PAGE[1] - 2 * MARGIN) / (font * 1.2)
     return {"cols": cols, "font": font, "pages": pages, "cpl": max(8.0, colw / (font * 0.5)), "per_col": per_col,
-            "capacity": pages * cols * per_col - 3.0 * cols * 0 - 3.0}  # three lines for the title on page one
+            "capacity": pages * cols * per_col - 3.0}  # three lines for the title on page one
 
 
 def section_lines(s: dict, geo: dict) -> float:
@@ -374,15 +369,14 @@ def break_section(secs: list[dict], o: dict) -> int | None:
     if len(live) < 2:
         return None
     half, run, best = sum(lines) / 2, 0.0, None
-    for i in live:
-        if best is None or abs(run - half) < abs(best[1] - half):
-            best = (i, run) if run else best
+    for n, i in enumerate(live):
+        if n and (best is None or abs(run - half) < best[0]):
+            best = (abs(run - half), i)
         run += lines[i]
-    return best[0] if best else None
+    return best[1] if best else None
 
 
 # ---------------------------------------------------------------- the AI steps
-LANG = "Write in {lang}."
 SYSTEM = ("You make dense, accurate cheatsheets for students from their own lecture slides and notes. Short items, no filler, "
           "and only what is in the material: never add facts, formulas or numbers it does not contain.")
 
@@ -392,6 +386,45 @@ def wants(o: dict) -> str:
     names = {"definitions": "definition", "formulas": "formula", "examples": "example", "dates": "date (dates and names)", "steps": "step (procedures, in order)", "comparisons": "comparison"}
     on = [names[k] for k in names if inc.get(k, True)]
     return ", ".join(on + ["concept (a key idea)"])
+
+
+def answers_text(st: dict) -> str:
+    qs = {q["id"]: q["q"] for q in st.get("questions") or []}
+    got = [f"- {qs[k]} {v}" for k, v in (st.get("answers") or {}).items() if k in qs and str(v).strip()]
+    return ("\nWhat the person told you about this sheet:\n" + "\n".join(got) + "\n") if got else ""
+
+async def questions(cid: str) -> dict:
+    """Optional "ask me first": a few short questions about what the sheet is for, from a quick look at the sources."""
+    import asyncio
+    from .wizard import ensure_ai
+    st = load(cid)
+    if not st["sources"] and not st["materials"]:
+        raise ValueError("Pick at least one source first.")
+    ensure_ai()
+    items, _ = await asyncio.to_thread(sources.collect, st["sources"], st["materials"])
+    text = await sources.digest(items, budget=12000)
+    j = await complete_json(f"""Someone wants a printed cheatsheet from these sources. Ask 2-4 short questions that would change what goes on it
+(for example: which exam or topic to focus on, which chapters matter most, whether formulas need worked examples, what they already know).
+Give 2-4 short answer choices for each; the person may also type their own.
+
+SOURCES:
+{text}
+
+Return JSON: {{"questions": [{{"q": "...", "options": ["...", "..."]}}]}}""", SYSTEM, task="cheatsheet-questions")
+    qs = [{"id": f"q{n}", "q": str(q.get("q") or "").strip()[:200], "options": [str(o).strip()[:80] for o in (q.get("options") or [])][:4]}
+          for n, q in enumerate((j.get("questions") if isinstance(j, dict) else j) or [], 1) if isinstance(q, dict) and str(q.get("q") or "").strip()][:4]
+    if not qs:
+        raise ValueError("The AI had no questions. You can go on without them.")
+    st = load(cid)
+    st.update(questions=qs, answers={})
+    return public(save(st))
+
+
+def answer(cid: str, answers: dict) -> dict:
+    st = load(cid)
+    ids = {q["id"] for q in st.get("questions") or []}
+    st["answers"] = {k: str(v).strip()[:300] for k, v in (answers or {}).items() if k in ids}
+    return public(save(st))
 
 
 async def propose(cid: str, step=lambda s: None) -> dict:
@@ -411,7 +444,7 @@ async def propose(cid: str, step=lambda s: None) -> dict:
     j = await complete_json(f"""Make a cheatsheet from these sources. It will be printed on {'one side of one A4 page' if o.get('length') == '1' else 'two A4 pages' if o.get('length') == '2' else 'both sides of one A4 sheet'} in {geo['cols']} columns, so be compact.
 {('Write in ' + o['language'] + '.') if o.get('language') else 'Write in the language of the sources.'}
 
-Group the items into 4-12 sections by topic. Aim for about {target} items in total, most important first in each section.
+{answers_text(st)}Group the items into 4-12 sections by topic. Aim for about {target} items in total, most important first in each section.
 Item kinds you may use: {wants(o)}.
 - definition: "Term: short definition".  formula: the formula in plain text or Unicode (a*b^2, x̄ = Σx/n) with what the symbols mean.
 - example: one line with the numbers.  step: one numbered procedure per item, steps separated by " > ".  comparison: "A vs B: the difference".

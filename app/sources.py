@@ -54,7 +54,10 @@ def extract_text(name: str, data: bytes) -> str:
         except (zipfile.BadZipFile, ET.ParseError, KeyError):
             raise ValueError(f"{name} isn't a PowerPoint file A.F.R.A can read.")
     from .gaps import manuscript_text
-    return manuscript_text(name, data).strip()
+    try:
+        return manuscript_text(name, data).strip()
+    except Exception:  # a damaged pdf or docx: say so instead of failing the whole set
+        raise ValueError(f"{name} couldn't be read (is it damaged or password-protected?).")
 
 
 def clean_refs(refs) -> list[dict]:
@@ -237,3 +240,19 @@ Write at most {share // 6} words{(' in ' + language) if language else ''}.
         blocks.append(f"### [{it['tag']}] {it['label']}  ({'library paper, cite as ' + source_text(it) if it['kind'] == 'paper' and it.get('key') else it['kind']})\n{text[:max(share, budget) if total <= budget else int(share * 1.3)]}")
     out = "\n\n".join(blocks)
     return out[:int(budget * 1.4) + 400 * len(items)]
+
+
+def label(r: dict) -> dict:
+    """The chip for one picked source: what it is called and whether it still exists."""
+    t = r["type"]
+    if t == "doc":
+        d = db.get_document(r["id"])
+        name = d["title"] if d else ""
+    elif t == "paper":
+        p = db.get_paper(r["id"], with_fulltext=False)
+        name = (p.get("title") or "Untitled") if p else ""
+    elif t in ("file", "folder"):
+        name = (r["path"].rsplit("/", 1)[-1] if r["path"] else "All Tugas") + ("/" if t == "folder" else "")
+    else:
+        name = ""
+    return {**r, "name": name or "(no longer available)", "ok": bool(name)}

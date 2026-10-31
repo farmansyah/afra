@@ -70,24 +70,8 @@ def public(st: dict) -> dict:
     out["materials"] = [{"id": m["id"], "name": m["name"], "chars": len(m["text"])} for m in st.get("materials") or []]
     out["essay_info"] = essay_info(st)
     if st["source"]["type"] == "multi":
-        out["source_labels"] = [source_label(r) for r in st["source"].get("items") or []]
+        out["source_labels"] = [sources.label(r) for r in st["source"].get("items") or []]
     return out
-
-
-def source_label(r: dict) -> dict:
-    """The chip for one picked source: what it is called and whether it still exists."""
-    t = r["type"]
-    if t == "doc":
-        d = db.get_document(r["id"])
-        name = d["title"] if d else ""
-    elif t == "paper":
-        p = db.get_paper(r["id"], with_fulltext=False)
-        name = (p.get("title") or "Untitled") if p else ""
-    elif t in ("file", "folder"):
-        name = (r["path"].rsplit("/", 1)[-1] if r["path"] else "All Tugas") + ("/" if t == "folder" else "")
-    else:
-        name = ""
-    return {**r, "name": name or "(no longer available)", "ok": bool(name)}
 
 
 def listing() -> list[dict]:
