@@ -264,6 +264,8 @@ COOKIES = DATA_DIR / "youtube-cookies.txt"  # optional Netscape cookies.txt expo
 
 
 def _ydl(opts: dict):
+    if os.environ.get("AFRA_FORCE_YT_BLOCK") == "1":  # smoke runs only: behave like a server YouTube blocks, to try the PC relay
+        raise ValueError(BLOCKED + ", so it blocked A.F.R.A. (forced for a test)")
     try:
         import yt_dlp
     except ImportError:
