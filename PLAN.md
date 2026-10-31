@@ -204,3 +204,7 @@ Paste YouTube links (one per line, up to 10 sources with A.F.R.A documents or up
 - **Next (asked):** personalise per user, using the existing user database of the AFRA chat (afra-chat), so each person has their own projects, settings and keys. Then a login can ride on the same accounts. Until then anyone with the URL has full access.
 - **YouTube blocks the VPS:** solved by the PC relay (`app/relay.py`, Settings › Video relay: the PC polls the VPS with a shared token and sends captions/video up) and, when the PC is off or blocked, by pasting the transcript by hand (`video.add_transcript`). The cookie file stays an optional third way (README).
 - The PC copy (afra.com) is the private offline copy; the two libraries are not synced (sync between them is not planned yet).
+
+
+## Phones (iPhone, "liquid glass")
+`static/mobile.css` + `mobile.js` + `manifest.webmanifest`: below 760px a floating glass tab bar (Home, Search, Library, Video, More = the full menu as a glass sheet), glass cards and sheets (blur over soft colour, theme-aware, solid fallback without backdrop-filter or with reduced transparency), safe areas (`viewport-fit=cover`), 16px inputs (no iOS zoom), 44px targets, add-to-home-screen app tags. Desktop is untouched (all of it inside the media query). Checked at 375px on every page: no sideways scroll. Not tried on a real iPhone.

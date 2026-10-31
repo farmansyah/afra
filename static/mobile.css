@@ -1,0 +1,114 @@
+/* Phones (iPhone first): a floating "liquid glass" tab bar, glass cards and sheets, safe areas, touch-sized controls.
+   Everything that changes the look is inside the phone media query, so the desktop page stays exactly as it was.
+   Glass = a translucent layer of the theme's own panel colour + backdrop blur + a thin light edge; where the browser can't blur,
+   or the person asked for less transparency, the layers turn solid. */
+:root {
+  --glass-hi: rgba(255, 255, 255, .75); --glass-lo: rgba(255, 255, 255, .18); --glass-shadow: 0 10px 34px rgba(16, 24, 40, .16);
+  --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
+}
+:root[data-theme="dark"] { --glass-hi: rgba(255, 255, 255, .2); --glass-lo: rgba(255, 255, 255, .06); --glass-shadow: 0 10px 34px rgba(0, 0, 0, .55); }
+#tabbar { display: none; }
+
+@media (max-width: 760px) {
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  html, body { height: 100%; }
+  @supports (height: 100dvh) { html, body { height: 100dvh; } }
+  body { -webkit-tap-highlight-color: transparent; position: relative; }
+  a, button, label, summary, select, input { touch-action: manipulation; }
+
+  /* soft colour behind everything, so the glass has something to bend */
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(70% 38% at 12% 0%, color-mix(in srgb, var(--accent-2) 30%, transparent), transparent),
+                radial-gradient(55% 34% at 100% 32%, color-mix(in srgb, var(--gold) 24%, transparent), transparent),
+                radial-gradient(70% 40% at 25% 100%, color-mix(in srgb, var(--accent) 26%, transparent), transparent); }
+
+  /* page */
+  #main { padding: calc(var(--safe-t) + 14px) calc(var(--safe-r) + 14px) calc(112px + var(--safe-b)) calc(var(--safe-l) + 14px);
+    -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+  h1 { font-size: 23px; } h2 { font-size: 19px; }
+  .page-head { margin-bottom: 14px; }
+  .page-head > div:first-child { min-width: 0; flex: 1 1 100%; }
+  .page-head .row { flex-wrap: wrap; }
+  #menuBtn { display: none; }
+  .grid, .split, .split-wide, .g2, .g3, #main [style*="grid-template-columns"]:not(.score-row) { grid-template-columns: minmax(0, 1fr) !important; }
+  .grid > *, .split > *, .split-wide > * { min-width: 0; }
+  img, video, canvas, svg { max-width: 100%; }
+  pre, code { white-space: pre-wrap; word-break: break-word; }
+  .card { padding: 14px; margin-bottom: 14px; min-width: 0; max-width: 100%; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { white-space: nowrap; flex: none; }
+  table.lib { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .statusbar, .row { min-width: 0; }
+
+  /* controls: 16px text (iOS zooms the page on anything smaller) and finger-sized targets */
+  input[type=text], input[type=number], input[type=password], input[type=email], input[type=url], input[type=search], select, textarea { font-size: 16px; min-height: 44px; border-radius: 14px; }
+  textarea { min-height: 88px; }
+  .btn { min-height: 42px; padding: 9px 16px; border-radius: 14px; font-size: 14px; }
+  .btn.small { min-height: 36px; padding: 6px 12px; border-radius: 12px; }
+  input[type=checkbox], input[type=radio] { width: 20px; height: 20px; }
+  .icon-btn { width: 40px; min-height: 40px; border-radius: 12px; }
+  #nav a { padding: 12px 12px; border-radius: 14px; font-size: 15px; }
+  .list-item { padding-top: 12px; padding-bottom: 12px; }
+
+  /* the glass layers */
+  .card, .modal-box, #tabbar, body.nav-open #sidebar, .toast, #chatFab {
+    background: var(--panel);
+    background: color-mix(in srgb, var(--panel) 60%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8);
+    border: 1px solid var(--glass-lo);
+    box-shadow: inset 0 1px 0 var(--glass-hi), inset 0 -1px 0 var(--glass-lo), var(--glass-shadow);
+  }
+  .card, .modal-box { border-radius: 24px; }
+  input[type=text], input[type=number], input[type=password], input[type=email], input[type=url], input[type=search], select, textarea {
+    background: color-mix(in srgb, var(--panel) 70%, transparent); }
+
+  /* the floating tab bar */
+  #tabbar { display: flex; position: fixed; z-index: 46; left: calc(var(--safe-l) + 12px); right: calc(var(--safe-r) + 12px); bottom: calc(10px + var(--safe-b));
+    padding: 6px; gap: 2px; border-radius: 32px; }
+  #tabbar a, #tabbar button { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px;
+    padding: 6px 2px 5px; border: 0; border-radius: 26px; background: none; color: var(--ink-2); font: 600 10.5px/1.1 var(--sans); text-decoration: none; cursor: pointer; }
+  #tabbar i { font-style: normal; font-size: 21px; line-height: 1; }
+  #tabbar .on { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); box-shadow: inset 0 1px 0 var(--glass-hi), inset 0 0 0 1px var(--glass-lo); }
+
+  /* the menu: a dark glass sheet that rises above the tab bar */
+  body.nav-open::after { content: ""; position: fixed; inset: 0; z-index: 44; background: rgba(8, 12, 24, .32); }
+  body.nav-open #sidebar { display: flex; position: fixed; z-index: 45; left: calc(var(--safe-l) + 10px); right: calc(var(--safe-r) + 10px); top: auto;
+    bottom: calc(82px + var(--safe-b)); width: auto; max-height: calc(100dvh - 110px - var(--safe-t) - var(--safe-b)); overflow-y: auto; -webkit-overflow-scrolling: touch;
+    border-radius: 28px; padding: 14px; color: var(--side-ink);
+    background: color-mix(in srgb, var(--side) 66%, transparent); }
+  body.nav-open #sidebar .brand { padding-bottom: 10px; }
+  body.nav-open #sidebar .proj-row select { min-height: 44px; font-size: 16px; }
+  body.nav-open #sidebar #nav a.active { background: color-mix(in srgb, var(--side-active) 80%, transparent); }
+
+  /* sheets and pop-ups */
+  .modal { place-items: end center; padding: calc(var(--safe-t) + 8px) 8px calc(8px + var(--safe-b)); }
+  .modal-box, .modal-box.wide { width: 100%; max-height: calc(100dvh - 16px - var(--safe-t) - var(--safe-b)); padding: 18px 16px; }
+  .modal-foot { flex-wrap: wrap; }
+  #toasts { left: 12px; right: 12px; bottom: calc(88px + var(--safe-b)) !important; align-items: center; }
+  body.chat-open #toasts { right: 12px !important; }
+  .toast { max-width: 100%; border-radius: 18px; color: var(--ink); }
+  .toast.bad { color: var(--bad-ink); } .toast.ok { color: var(--ok-ink); }
+  #chatFab { right: calc(var(--safe-r) + 14px); bottom: calc(88px + var(--safe-b)); width: 52px; height: 52px; color: var(--ink); }
+  #chatPop, #chatPop.big { padding-top: var(--safe-t); padding-bottom: var(--safe-b); }
+  body.chat-open #tabbar { display: none; }
+  body.nav-open #chatFab, body:has(#modal:not(.hidden)) #chatFab { display: none; }
+}
+
+@media (max-width: 380px) {
+  #main { padding-left: calc(var(--safe-l) + 10px); padding-right: calc(var(--safe-r) + 10px); }
+  #tabbar a, #tabbar button { font-size: 10px; }
+}
+
+/* no blur available, or the person asked for less transparency: solid layers */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  @media (max-width: 760px) {
+    .card, .modal-box, #tabbar, .toast, #chatFab { background: var(--panel); }
+    body.nav-open #sidebar { background: var(--side); }
+  }
+}
+@media (max-width: 760px) and (prefers-reduced-transparency: reduce) {
+  .card, .modal-box, #tabbar, .toast, #chatFab { background: var(--panel); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  body.nav-open #sidebar { background: var(--side); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

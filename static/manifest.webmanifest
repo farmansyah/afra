@@ -1,0 +1,10 @@
+{
+  "name": "A.F.R.A – Article Finder & Research Assistant",
+  "short_name": "A.F.R.A",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#14213d",
+  "theme_color": "#14213d",
+  "icons": [{ "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]
+}
