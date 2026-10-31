@@ -250,3 +250,9 @@ python tools/package.py       # builds dist/AFRA.zip (keeps the Mac launcher exe
 © 2026 **danafarmansyah**. All rights reserved. Crafted with ♥.
 
 A.F.R.A, its name, logo, design and source code are the work of danafarmansyah. See [LICENSE](LICENSE).
+
+## Video summary on a server
+On your own computer, **Video summary** works as it is. A server on a cloud network (a VPS) is often blocked by YouTube
+("prove it isn't a robot"). If you accept the risk to your account, put a browser cookie file at `data/youtube-cookies.txt`
+(Netscape `cookies.txt` format, exported with a cookies.txt browser extension while signed in to YouTube). A.F.R.A only uses it
+when the file exists. Use a spare Google account, not your main one: YouTube can flag accounts used from a datacenter.

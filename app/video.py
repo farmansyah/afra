@@ -242,7 +242,8 @@ def friendly_error(msg: str) -> str:
     if "age" in low and ("confirm" in low or "restricted" in low or "inappropriate" in low):
         return "This video is age-restricted. A.F.R.A doesn't sign in to YouTube, so it can't read it."
     if "not a bot" in low or "sign in to confirm" in low or "http error 429" in low or "too many requests" in low:
-        return "YouTube is asking this connection to prove it isn't a robot, so it blocked A.F.R.A. Try again later or from another network."
+        return ("YouTube is asking this connection to prove it isn't a robot, so it blocked A.F.R.A. Try again later or from another network."
+                + ("" if COOKIES.is_file() else f" On a server you can also put a browser cookie file at {COOKIES} (see the README)."))
     if "unavailable" in low or "removed" in low or "does not exist" in low or "terminated" in low:
         return "This video isn't available (removed, blocked in your country, or the link is wrong)."
     if "premieres in" in low or "live event" in low or "will begin" in low:
@@ -252,6 +253,9 @@ def friendly_error(msg: str) -> str:
     return "YouTube didn't let A.F.R.A fetch this video: " + (re.sub(r"\x1b\[[0-9;]*m", "", msg or "").replace("ERROR:", "").strip()[:200] or "unknown error")
 
 
+COOKIES = DATA_DIR / "youtube-cookies.txt"  # optional Netscape cookies.txt exported from a browser signed in to YouTube; never created or read by default
+
+
 def _ydl(opts: dict):
     try:
         import yt_dlp
@@ -259,6 +263,8 @@ def _ydl(opts: dict):
         raise ValueError("The video library (yt-dlp) isn't installed. Run: pip install yt-dlp imageio-ffmpeg")
     base = {"quiet": True, "no_warnings": True, "noplaylist": True, "ignoreconfig": True, "cachedir": False, "socket_timeout": 20,
             "retries": 3, "noprogress": True}
+    if COOKIES.is_file():  # only when the owner put one there: a server on a cloud network is often asked to prove it isn't a robot
+        base["cookiefile"] = str(COOKIES)
     return yt_dlp.YoutubeDL({**base, **opts})
 
 
